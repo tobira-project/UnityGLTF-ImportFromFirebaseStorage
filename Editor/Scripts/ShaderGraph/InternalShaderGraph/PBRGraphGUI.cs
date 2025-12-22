@@ -54,6 +54,7 @@ namespace UnityGLTF
 
 			if (m_FirstTimeApply)
 			{
+				this.currentMaterialInfo.hasMesh = false;
 				OnOpenGUI(targetMat, materialEditor, properties);
 
 				if (MaterialModificationTracker.CanEdit(materialEditor.target as Material))
@@ -72,7 +73,8 @@ namespace UnityGLTF
 				// looks like GetInstanceID() changes per import; so we use the path instead
 				var path = AssetDatabase.GetAssetPath(targetMat) + "_" + targetMat.name;
 				var materialEditingKey = nameof(PBRGraphGUI) + ".AllowGltfMaterialEditing." + path;
-				var isAllowed = SessionState.GetBool(materialEditingKey, false);
+				var parentAssetIsMaterialLibrary = !(AssetDatabase.LoadMainAssetAtPath(path) is GameObject);
+				var isAllowed = SessionState.GetBool(materialEditingKey, parentAssetIsMaterialLibrary);
 				var allowMaterialEditing = EditorGUILayout.Toggle("Allow Editing", isAllowed);
 				if (allowMaterialEditing != isAllowed)
 					SessionState.SetBool(materialEditingKey, allowMaterialEditing);
@@ -158,6 +160,7 @@ namespace UnityGLTF
 
 		private struct MaterialInfo
 		{
+			public bool hasMesh;
 			public bool hasColor;
 			public bool hasUV0;
 			public bool hasUV1;
@@ -259,6 +262,7 @@ namespace UnityGLTF
 				haveDrawnSomething = true;
 			}
 
+			currentMaterialInfo.hasMesh = false;
 			currentMaterialInfo.hasColor = true;
 			currentMaterialInfo.hasUV0 = true;
 			currentMaterialInfo.hasUV1 = true;
@@ -275,6 +279,7 @@ namespace UnityGLTF
 
 				if (mesh)
 				{
+					currentMaterialInfo.hasMesh = true;
 					currentMaterialInfo.hasColor = mesh.HasVertexAttribute(VertexAttribute.Color);
 					currentMaterialInfo.hasUV0 = mesh.HasVertexAttribute(VertexAttribute.TexCoord0);
 					currentMaterialInfo.hasUV1 = mesh.HasVertexAttribute(VertexAttribute.TexCoord1);
@@ -284,7 +289,10 @@ namespace UnityGLTF
 					EditorGUILayout.Toggle("Has Vertex Colors", currentMaterialInfo.hasColor);
 					EditorGUI.EndDisabledGroup();
 
-					if (currentMaterialInfo.hasColor != targetMaterial.IsKeywordEnabled("_VERTEX_COLORS_ON"))
+					/*
+					 > _VERTEX_COLORS_ON is currently not used in the shader, so we can't really check for it
+					 
+					 if (currentMaterialInfo.hasColor != targetMaterial.IsKeywordEnabled("_VERTEX_COLORS_ON"))
 					{
 						EditorGUI.indentLevel++;
 						var msg = "";
@@ -317,7 +325,7 @@ namespace UnityGLTF
 							});
 						}
 						EditorGUI.indentLevel--;
-					}
+					}*/
 
 					EditorGUI.BeginDisabledGroup(true);
 					EditorGUILayout.Toggle("Has UV0", currentMaterialInfo.hasUV0);
@@ -473,7 +481,7 @@ namespace UnityGLTF
 			var propertyList = properties.ToList();
 			if (!targetMaterial.IsKeywordEnabled("_TEXTURE_TRANSFORM_ON"))
 			{
-				propertyList.RemoveAll(x => x.name.EndsWith("_ST", StringComparison.Ordinal) || x.name.EndsWith("Rotation", StringComparison.Ordinal));
+				propertyList.RemoveAll(x => x.name.EndsWith("_ST", StringComparison.Ordinal) || x.name.EndsWith("TextureRotation", StringComparison.Ordinal));
 				
 				// Unity draws the tiling & offset properties based on the scale offset flag, so we need to ensure that's off here
 				// so that the property fields are not displayed. Otherwise it's confusing that editing them doesn't do anything.
@@ -489,9 +497,13 @@ namespace UnityGLTF
 				propertyList.RemoveAll(x => x.name.EndsWith("_ST", StringComparison.Ordinal));
 			}
 			#endif
-			if (!targetMaterial.IsKeywordEnabled("_VOLUME_TRANSMISSION_ON"))
+			if (!targetMaterial.IsKeywordEnabled("_VOLUME_TRANSMISSION_ON") && !targetMaterial.IsKeywordEnabled("_VOLUME_TRANSMISSION_ANDDISPERSION"))
 			{
 				propertyList.RemoveAll(x => x.name.StartsWith("transmission", StringComparison.Ordinal));
+			}
+			if (!targetMaterial.IsKeywordEnabled("_VOLUME_TRANSMISSION_ANDDISPERSION"))
+			{
+				propertyList.RemoveAll(x => x.name.StartsWith("dispersion", StringComparison.Ordinal));
 			}
 			if (!targetMaterial.HasProperty("_VOLUME_ON") || !(targetMaterial.GetFloat("_VOLUME_ON") > 0.5f))
 			{
@@ -509,25 +521,46 @@ namespace UnityGLTF
 			{
 				propertyList.RemoveAll(x => x.name.StartsWith("clearcoat", StringComparison.Ordinal));
 			}
+			if (!targetMaterial.IsKeywordEnabled("_SHEEN_ON"))
+			{
+				propertyList.RemoveAll(x => x.name.StartsWith("sheen", StringComparison.Ordinal));
+			}
+			if (!targetMaterial.HasProperty("_ANISOTROPY") || !(targetMaterial.GetFloat("_ANISOTROPY") > 0.5f))
+			{
+				propertyList.RemoveAll(x => x.name.StartsWith("anisotropy", StringComparison.Ordinal));
+			}
+			
 			if (HasPropertyButNoTex(targetMaterial, "occlusionTexture"))
 			{
 				propertyList.RemoveAll(x => x.name == "occlusionStrength" || (x.name.StartsWith("occlusionTexture", StringComparison.Ordinal) && x.name != "occlusionTexture"));
 			}
 			// remove UV-related properties
-			if (HasPropertyButNoTex(targetMaterial, "baseColorTexture") && HasPropertyButNoTex(targetMaterial,"metallicRoughnessTexture") && HasPropertyButNoTex(targetMaterial,"normalTexture") && HasPropertyButNoTex(targetMaterial,"emissiveTexture"))
+			if (HasPropertyButNoTex(targetMaterial, "baseColorTexture"))
 			{
 				propertyList.RemoveAll(x => x.name.StartsWith("baseColorTexture", StringComparison.Ordinal) && x.name != "baseColorTexture");
 			}
-			if (HasPropertyButNoTex(targetMaterial,"normalTexture"))
+			if (HasPropertyButNoTex(targetMaterial, "metallicRoughnessTexture"))
+			{
+				propertyList.RemoveAll(x => x.name.StartsWith("metallicRoughnessTexture", StringComparison.Ordinal) && x.name != "metallicRoughnessTexture");
+			}
+			if (HasPropertyButNoTex(targetMaterial, "normalTexture"))
+			{
+				propertyList.RemoveAll(x => x.name.StartsWith("normalTexture", StringComparison.Ordinal) && x.name != "normalTexture");
+			}
+			if (HasPropertyButNoTex(targetMaterial, "emissiveTexture"))
+			{
+				propertyList.RemoveAll(x => x.name.StartsWith("emissiveTexture", StringComparison.Ordinal) && x.name != "emissiveTexture");
+			}
+			if (HasPropertyButNoTex(targetMaterial, "normalTexture"))
 			{
 				propertyList.RemoveAll(x => x.name == "normalScale");
 			}
-			if (!currentMaterialInfo.hasUV0 && !currentMaterialInfo.hasUV1)
+			if (currentMaterialInfo.hasMesh && !currentMaterialInfo.hasUV0 && !currentMaterialInfo.hasUV1)
 			{
 				// hide all texture properties if no UVs
 				propertyList.RemoveAll(x => x.name.Contains("texture"));
 			}
-			if (!currentMaterialInfo.hasUV1 && currentMaterialInfo.occlusionTextureTexCoord == 0 && currentMaterialInfo.baseColorTextureTexCoord == 0)
+			if (currentMaterialInfo.hasMesh && !currentMaterialInfo.hasUV1 && currentMaterialInfo.occlusionTextureTexCoord == 0 && currentMaterialInfo.baseColorTextureTexCoord == 0)
 			{
 				propertyList.RemoveAll(x => x.name.EndsWith("TextureTexCoord", StringComparison.Ordinal));
 			}
@@ -577,6 +610,23 @@ namespace UnityGLTF
 		public delegate void OnImmutableMaterialChanged(Material material);
 		public static event OnImmutableMaterialChanged ImmutableMaterialChanged;
 
+		public delegate bool IsMaterialEditableCallback(Material material);
+		public static event IsMaterialEditableCallback IsMaterialEditable;
+
+		internal static bool GetIsMaterialEditable(Material material)
+		{
+			
+			try
+			{
+				return IsMaterialEditable?.Invoke(material) ?? false;
+			}
+			catch (Exception e)
+			{
+				Debug.LogException(e);
+				return false;
+			}
+		}
+		
 		internal static void InvokeMaterialChangedEvent(Material material)
 		{
 			try
@@ -622,9 +672,9 @@ namespace UnityGLTF
 		{
 			if (CanEditCache.TryGetValue(materialEditorTarget, out var canEdit))
 				return canEdit;
-
-			// we can only edit this material if it's from a .gltf file right now. We're caching this here to avoid having to re-parse the file
-			canEdit = AssetDatabase.GetAssetPath(materialEditorTarget).EndsWith(".gltf", StringComparison.OrdinalIgnoreCase);
+			
+			canEdit = PBRGraphGUI.GetIsMaterialEditable(materialEditorTarget);
+			
 			CanEditCache.Add(materialEditorTarget, canEdit);
 			return canEdit;
 		}

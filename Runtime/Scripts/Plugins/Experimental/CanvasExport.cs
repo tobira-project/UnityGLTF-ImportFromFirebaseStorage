@@ -7,9 +7,10 @@ using UnityEngine.UI;
 
 namespace UnityGLTF.Plugins
 {
+    [ExperimentalPlugin]
     public class CanvasExport : GLTFExportPlugin
     {
-        public override string DisplayName => "Bake to Mesh: Canvas";
+        public override string DisplayName => "Bake to Mesh: Canvas UI";
         public override string Description => "Bakes UI Canvas components to meshes and materials. Render order is estimated by slight transform offsets; results might differ in viewers depending on how transparent objects are sorted.";
         public override bool EnabledByDefault => false;
         public override GLTFExportPluginContext CreateInstance(ExportContext context)
@@ -27,17 +28,27 @@ namespace UnityGLTF.Plugins
             // emit mesh and material if this is a Graphic element in a Canvas that's not disabled
             if (!shader)
             {
-                shader = Shader.Find("Hidden/UnityGLTF/UnlitGraph-Transparent");
+                shader = Shader.Find("UnityGLTF/UnlitGraph");
 #if UNITY_EDITOR
-                if (!shader) shader = AssetDatabase.LoadAssetAtPath<Shader>(AssetDatabase.GUIDToAssetPath("83f2caca07949794fb997734c4b0520f"));
+                if (!shader) shader = AssetDatabase.LoadAssetAtPath<Shader>(AssetDatabase.GUIDToAssetPath("59541e6caf586ca4f96ccf48a4813a51"));
 #endif
+                if (!shader)
+                {
+                    Debug.LogError("CanvasExport: Shader not found. Please make sure the UnityGLTF/UnlitGraph shader is included in build or add the UnityGLTFShaderVariantCollection in Project Settings/Graphics.");
+                    return;
+                }
             }
             
             var g = transform;
 
             // force refresh
             var r = transform.GetComponent<CanvasRenderer>();
-            if (r) r.GetType().GetMethod("RequestRefresh", (BindingFlags)(-1)).Invoke(r, null);
+            if (r)
+            {
+                var rMethod = r.GetType().GetMethod("RequestRefresh", (BindingFlags)(-1));
+                if (rMethod != null)
+                    rMethod.Invoke(r, null);
+            }
             
             var canvas = g.GetComponent<Graphic>() ? g.GetComponent<Graphic>().canvas : null;
             var canvasRect = canvas ? canvas.GetComponent<RectTransform>().rect : new Rect(0,0,1000,1000);

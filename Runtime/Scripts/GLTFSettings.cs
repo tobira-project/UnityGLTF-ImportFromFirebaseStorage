@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using UnityGLTF.Plugins;
 using System.Reflection;
+using UnityEngine.Serialization;
 
 #if UNITY_EDITOR
 using UnityEditor;
@@ -19,6 +20,44 @@ namespace UnityGLTF
 	    private const string k_SettingsFileName = "UnityGLTFSettings.asset";
 	    public const string k_RuntimeAndEditorSettingsPath = "Assets/Resources/" + k_SettingsFileName;
 
+	    
+	    [SerializeField, HideInInspector]
+	    // Will be set on building in PackageVersionPreprocessBuild.cs
+	    internal string packageVersion = null;
+	    
+	    public string Generator { get => GetGenerator();}
+	    
+#if UNITY_EDITOR
+	    internal string GetUnityGltfVersion()
+	    {
+		    var packageInfo = UnityEditor.PackageManager.PackageInfo.FindForAssembly(Assembly.GetAssembly(typeof(GLTFSettings)));
+		    if (packageInfo != null)
+			    return packageInfo.version;
+		    return "";
+	    }
+#endif
+	    
+	    internal string GetGenerator()
+	    {
+		    string gltfVersion;
+#if UNITY_EDITOR
+		    gltfVersion = GetUnityGltfVersion();
+#else
+			gltfVersion = packageVersion;
+#endif
+		    var renderPipeline = "Built-in RP";
+		    var renderPipelineAsset =  UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline;
+		    if (renderPipelineAsset)
+		    { 
+			    renderPipeline = renderPipelineAsset.GetType().Name;
+			    if (renderPipeline == "UniversalRenderPipelineAsset")
+				    renderPipeline = "URP";
+			    else if (renderPipeline == "HighDefinitionRenderPipelineAsset")
+				    renderPipeline = "HDRP";
+		    }
+		    return  $"UnityGltf {gltfVersion}, Unity {Application.unityVersion}, {renderPipeline}";
+	    }
+	    
 	    [Flags]
 	    public enum BlendShapeExportPropertyFlags
 	    {
@@ -28,6 +67,27 @@ namespace UnityGLTF
 		    Tangent = 4,
 		    All = ~0
 	    }
+	    
+#if UNITY_EDITOR
+	    [Serializable]
+	    public class ShaderStrippingSettings
+	    {
+		    [Flags]
+		    public enum ShaderPassStrippingMode
+		    {
+			    None = 0,
+			    BuiltInPasses = 1,
+			    URPForwardPasses = 2,
+			    URPDeferredPasses = 4,
+		    }
+		    
+		    public bool stripPassesFromAllShaders = false;
+		    public ShaderPassStrippingMode stripPasses = ShaderPassStrippingMode.None;
+	    }
+	    
+	    [Tooltip("Strip unnecessary shader passes from built-in and URP shader passes. This can drastically reduce shader compile time and size.")]
+	    public ShaderStrippingSettings shaderStrippingSettings = new ShaderStrippingSettings();
+#endif
 
 	    // Plugins
 	    [SerializeField, HideInInspector]
@@ -42,9 +102,40 @@ namespace UnityGLTF
 		[SerializeField]
 		[Tooltip("If on, the entire texture path will be preserved. If off (default), textures are exported at root level.")]
 		private bool exportFullPath = false;
-		[SerializeField]
-		private bool requireExtensions = false;
 
+#if UNITY_EDITOR
+	    public enum TransformMode
+	    {
+		    /** Reset local position, keep local rotation, keep world scale. This is a heuristic for exporting objects from anywhere in the scene for general usage. */
+		    [InspectorName(("Auto: reset local position, keep local rotation, keep world scale"))]
+		    Auto,
+		    /** Keep local position, rotation, and scale. This is useful if you want to export childs of hierarchies and import them again as childs. */
+		    [InspectorName("Local: keep local position, rotation and scale")]
+		    LocalTransforms,
+		    /** Keep world position, rotation, and scale. This is useful for exporting parts of scenes and keeping all relations between objects the same. */
+		    [InspectorName("World: keep world position, rotation and scale")]
+		    WorldTransforms,
+		    /** Reset position, rotation, and scale to identity. Keeps scale aspect ratio, so purposefully stretched objects will stay stretched. */
+		    [InspectorName("Reset: reset position, rotation and scale")]
+		    Reset,
+	    }
+	    
+	    [Tooltip("Specifies how root transforms will be exported.\nAuto (default): reset local position, keep local rotation, keep world scale. \nLocalTransforms: keep local position, rotation, and scale. \nWorldTransforms: keep world position, rotation, and scale.")]
+	    public TransformMode EditorExportTransformMode = TransformMode.Auto;
+
+	    public enum ExportFileFormat
+	    {
+		    /** glTF-Binary (GLB) with embedded buffers and textures */
+		    [InspectorName("glTF-Binary (.glb)")]
+		    Glb,
+		    /** glTF JSON + separate binary buffers and textures */
+		    [InspectorName("glTF (.gltf + .bin + textures)")]
+		    Gltf,
+	    }
+	    
+	    public ExportFileFormat EditorExportFileFormat = ExportFileFormat.Glb;
+#endif
+	    
 		[Header("Export Visibility")]
 		[SerializeField]
 		[Tooltip("Uses Camera.main layer settings to filter which objects are exported")]
@@ -93,7 +184,6 @@ namespace UnityGLTF
 		public bool ExportNames { get => exportNames; set  => exportNames = value; }
 		public bool ExportFullPath { get => exportFullPath; set => exportFullPath = value; }
 		public bool UseMainCameraVisibility { get => useMainCameraVisibility; set => useMainCameraVisibility = value; }
-		public bool RequireExtensions { get => requireExtensions; set => requireExtensions = value; }
 		public bool TryExportTexturesFromDisk { get => tryExportTexturesFromDisk; set => tryExportTexturesFromDisk = value; }
 		public bool UseTextureFileTypeHeuristic { get => useTextureFileTypeHeuristic; set => useTextureFileTypeHeuristic = value; }
 		public bool ExportVertexColors { get => exportVertexColors; set => exportVertexColors = value; }

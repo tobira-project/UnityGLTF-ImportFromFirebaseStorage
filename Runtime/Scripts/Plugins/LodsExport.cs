@@ -5,6 +5,7 @@ using UnityEngine;
 
 namespace UnityGLTF.Plugins
 {
+	[NonRatifiedPlugin]
 	public class LodsExport : GLTFExportPlugin
 	{
 		public override string DisplayName => "MSFT_lod";
@@ -46,7 +47,9 @@ namespace UnityGLTF.Plugins
 					return;
 				}
 
-				nodeIds[index] = exporter.ExportNode(lod.renderers[0].gameObject).Id;
+				var lodNode = exporter.ExportNode(lod.renderers[0].gameObject);
+				if (lodNode != null) nodeIds[index] = lodNode.Id;
+
 				coverages[index] = lod.screenRelativeTransitionHeight;
 			}
 			// if (usesCulling) coverages[coverages.Length - 1] = 0;

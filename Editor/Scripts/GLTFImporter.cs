@@ -85,10 +85,17 @@ namespace UnityGLTF
 
 	    [Tooltip("Turn this off to create an explicit GameObject for the glTF scene. A scene root will always be created if there's more than one root node.")]
         [SerializeField] internal bool _removeEmptyRootObjects = true;
-        [SerializeField] internal float _scaleFactor = 1.0f;
+        [SerializeField] internal float _scaleFactor = 1.0f; 
+        [Tooltip("Reduces identical resources. e.g. when identical meshes are found, only one will be imported.")]
+        [SerializeField] internal DeduplicateOptions _deduplicateResources = DeduplicateOptions.None;
         [SerializeField] internal int _maximumLod = 300;
         [SerializeField] internal bool _readWriteEnabled = true;
+        
+        // Just for backwards compatibility > should remove in future > use _addColliders instead
+		[Obsolete("Use _addColliders instead")]
         [SerializeField] internal bool _generateColliders = false;
+        [SerializeField] internal GLTFSceneImporter.ColliderType _addColliders = GLTFSceneImporter.ColliderType.None;
+        
         [SerializeField] internal bool _swapUvs = false;
         [SerializeField] internal bool _generateLightmapUVs = false;
 	    [Tooltip("When false, the index of the BlendShape is used as name.")]
@@ -99,6 +106,7 @@ namespace UnityGLTF
         [SerializeField] internal GLTFImporterNormals _importTangents = GLTFImporterNormals.Import;
         [SerializeField] internal CameraImportOption _importCamera = CameraImportOption.ImportAndCameraDisabled;
         [SerializeField] internal AnimationMethod _importAnimations = AnimationMethod.Mecanim;
+        [SerializeField] internal bool _mecanimHumanoidFlip = false;
         [SerializeField] internal bool _addAnimatorComponent = false;
         [SerializeField] internal bool _animationLoopTime = true;
         [SerializeField] internal bool _animationLoopPose = false;
@@ -110,7 +118,7 @@ namespace UnityGLTF
         [SerializeField] internal bool _useSceneNameIdentifier = false;
         [Tooltip("Compress textures after import using the platform default settings. If you need more control, use a .gltf file instead.")]
         [SerializeField] internal GLTFImporterTextureCompressionQuality _textureCompression = GLTFImporterTextureCompressionQuality.None;
-        
+        [SerializeField, Multiline] internal string _gltfAsset = default;
         // for humanoid importer
         [SerializeField] internal bool m_OptimizeGameObjects = false;
         [SerializeField] internal HumanDescription m_HumanDescription = new HumanDescription();
@@ -192,6 +200,10 @@ namespace UnityGLTF
         private static string[] GatherDependenciesFromSourceFile(string path)
         {
 	        var dependencies = new List<string>();
+	        
+	        // Add shader dependencies to ensure they're imported first
+	        dependencies.Add(AssetDatabase.GUIDToAssetPath(PBRGraphMap.PBRGraphGuid));
+	        dependencies.Add(AssetDatabase.GUIDToAssetPath(UnlitGraphMap.UnlitGraphGuid));
 
 	        // only supported glTF for now - would be harder to check for external references in glb assets.
 	        if (!path.ToLowerInvariant().EndsWith(".gltf"))
@@ -428,7 +440,7 @@ namespace UnityGLTF
                 // scale all localPosition values if necessary
                 if (gltfScene && !Mathf.Approximately(_scaleFactor, 1))
                 {
-	                var transforms = gltfScene.GetComponentsInChildren<Transform>();
+	                var transforms = gltfScene.GetComponentsInChildren<Transform>(true);
 	                foreach (var tr in transforms)
 	                {
 		                tr.localPosition *= _scaleFactor;
@@ -440,8 +452,8 @@ namespace UnityGLTF
                 var meshFilters = new List<(GameObject gameObject, Mesh sharedMesh)>();
                 if (gltfScene)
                 {
-		            meshFilters = gltfScene.GetComponentsInChildren<MeshFilter>().Select(x => (x.gameObject, x.sharedMesh)).ToList();
-	                meshFilters.AddRange(gltfScene.GetComponentsInChildren<SkinnedMeshRenderer>().Select(x => (x.gameObject, x.sharedMesh)));
+		            meshFilters = gltfScene.GetComponentsInChildren<MeshFilter>(true).Select(x => (x.gameObject, x.sharedMesh)).ToList();
+	                meshFilters.AddRange(gltfScene.GetComponentsInChildren<SkinnedMeshRenderer>(true).Select(x => (x.gameObject, x.sharedMesh)));
                 }
 
                 var vertexBuffer = new List<Vector3>();
@@ -477,31 +489,45 @@ namespace UnityGLTF
                     }
                     if (_generateLightmapUVs)
                     {
-	                    var uv2 = mesh.uv2;
-	                    if (uv2 == null || uv2.Length < 1)
+	                    var hasTriangleTopology = true;
+	                    for (var i = 0; i < mesh.subMeshCount; i++)
+		                    hasTriangleTopology &= mesh.GetTopology(i) == MeshTopology.Triangles;
+	                    
+	                    if (hasTriangleTopology)
 	                    {
-		                    var hasTriangleTopology = true;
-		                    for (var i = 0; i < mesh.subMeshCount; i++)
-								hasTriangleTopology &= mesh.GetTopology(i) == MeshTopology.Triangles;
+		                    // Clean uv2 if it exists. This matches Unity's ModelImporter behavior. See https://github.com/KhronosGroup/UnityGLTF/issues/871
+		                    if (mesh.uv2 != null)
+			                    mesh.uv2 = null;
+		                    
+		                    // Unity's Unwrapping.GenerateSecondaryUVSet() does not work with submesh baseVertex offsets.
+		                    // So if we have any of those, we need to remove the baseVertex offsets first, otherwise we get garbage meshes.
+		                    // See https://github.com/KhronosGroup/UnityGLTF/issues/668
+		                    var count = mesh.subMeshCount;
+		                    if (count > 1)
+		                    {
+			                    for (var i = 0; i < count; i++)
+			                    {
+				                    var subMeshDescriptor = mesh.GetSubMesh(i);
+				                    if (subMeshDescriptor.baseVertex == 0) continue;
+				                    
+				                    // Read indices with applyBaseVertex = true and write them back without baseVertex offset
+				                    var indices = mesh.GetIndices(i, true);
+				                    mesh.SetIndices(indices, MeshTopology.Triangles, i, false, 0);
+				                    
+				                    // Update the descriptor
+				                    subMeshDescriptor.baseVertex = 0;
+				                    mesh.SetSubMesh(i, subMeshDescriptor, MeshUpdateFlags.DontRecalculateBounds | MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontNotifyMeshUsers | MeshUpdateFlags.DontResetBoneBounds);
+			                    }
+		                    }
 
-		                    // uv2 = Unwrapping.GeneratePerTriangleUV(mesh);
-		                    // mesh.SetUVs(1, uv2);
-
-		                    // There seems to be a bug in Unity's splitting code:
-		                    // for some meshes, the result is broken after splitting.
-		                    if (hasTriangleTopology)
-								Unwrapping.GenerateSecondaryUVSet(mesh);
+		                    // TODO We might want to be able to set the unwrap settings via the importer.
+		                    UnwrapParam.SetDefaults(out var unwrapSettings);
+							Unwrapping.GenerateSecondaryUVSet(mesh, unwrapSettings);
 	                    }
                     }
 
 					mesh.UploadMeshData(!_readWriteEnabled);
 					mesh.RecalculateBounds(MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontNotifyMeshUsers);
-
-                    if (_generateColliders)
-                    {
-                        var collider = mf.gameObject.AddComponent<MeshCollider>();
-                        collider.sharedMesh = mesh;
-                    }
 
                     return mesh;
                 }).Where(x => x).ToArray();
@@ -526,12 +552,12 @@ namespace UnityGLTF
 
                 if (gltfScene && _importAnimations == AnimationMethod.MecanimHumanoid)
                 {
-	                var avatar = HumanoidSetup.AddAvatarToGameObject(gltfScene);
+	                var avatar = HumanoidSetup.AddAvatarToGameObject(gltfScene, _mecanimHumanoidFlip);
 	                if (avatar)
 						ctx.AddObjectToAsset("avatar", avatar);
                 }
 
-                var renderers = gltfScene ? gltfScene.GetComponentsInChildren<Renderer>() : Array.Empty<Renderer>();
+                var renderers = gltfScene ? gltfScene.GetComponentsInChildren<Renderer>(true) : Array.Empty<Renderer>();
 
                 if (_importMaterials)
                 {
@@ -561,6 +587,15 @@ namespace UnityGLTF
 		                    // In case the material is explicit set to instancing (e.g. EXT_mesh_gpu_instancing is used), don't override it.
 		                    if (!mat.enableInstancing)
 								mat.enableInstancing = _enableGpuInstancing;
+		                    
+		                    // If we're in built-in RP, don#t use GPU instancing since Shader Graph doesn't support it.
+		                    if (!GraphicsSettings.currentRenderPipeline)
+		                    {
+			                    // Shader Graphs are not compatible with GPU instancing, so we need to turn it off
+			                    // even if the user has explicitly turned the option to import materials with GPU instancing on.
+			                    mat.enableInstancing = false;
+		                    }
+		                    
 		                    materials.Add(mat);
 	                    }
                     }
@@ -699,8 +734,7 @@ namespace UnityGLTF
 		                        if (_textureCompression != GLTFImporterTextureCompressionQuality.None)
 		                        {
 			                        // platform-dependant texture compression
-			                        var buildTargetName = BuildPipeline.GetBuildTargetName(ctx.selectedBuildTarget);
-			                        var format = TextureImporterHelper.GetAutomaticFormat(tex, buildTargetName);
+			                        var format = TextureImporterHelper.GetAutomaticFormat(tex, ctx.selectedBuildTarget);
 			                        var convertedFormat = (TextureFormat)(int)format;
 			                        if ((int)convertedFormat > -1)
 			                        {
@@ -831,10 +865,16 @@ namespace UnityGLTF
 	        }
 	        else if (m_Materials.Length > 0)
 	        {
+		        // Create a "MaterialLibrary" asset that will hold one or more materials imported from glTF
+		        var library = ScriptableObject.CreateInstance<MaterialLibrary>();
+		        ctx.AddObjectToAsset("material library", library);
+		        ctx.SetMainObject(library);
+		        /*
 		        if (m_Materials.Length == 1)
 		        {
 			        ctx.SetMainObject(m_Materials[0]);
 		        }
+		        */
 	        }
 #else
             // Set main asset
@@ -915,6 +955,7 @@ namespace UnityGLTF
 			    ImportBlendShapeNames = _importBlendShapeNames,
 			    BlendShapeFrameWeight = _blendShapeFrameWeight,
 			    CameraImport = _importCamera,
+			    DeduplicateResources = _deduplicateResources,
 		    };
 
 		    using (var stream = File.OpenRead(projectFilePath))
@@ -948,6 +989,17 @@ namespace UnityGLTF
 			    loader.MaximumLod = _maximumLod;
 			    loader.IsMultithreaded = true;
 
+			    // For backwards compatibility, _addColliders has replaced _generateColliders
+#pragma warning disable CS0618
+			    if (_generateColliders)
+			    {
+				    _addColliders = GLTFSceneImporter.ColliderType.Mesh;
+				    _generateColliders = false;
+			    }
+#pragma warning restore CS0618
+			    
+			    loader.Collider = _addColliders;
+
 			    // Need to call with RunSync, otherwise the draco loader will freeze the editor
 			    AsyncHelpers.RunSync(() => loader.LoadSceneAsync());
 
@@ -959,7 +1011,7 @@ namespace UnityGLTF
 			    scene = loader.LastLoadedScene;
 			    animationClips = loader.CreatedAnimationClips;
 
-
+			    _gltfAsset = loader.Root.Asset?.ToString(true);
 			    importer = loader;
 		    }
 	    }

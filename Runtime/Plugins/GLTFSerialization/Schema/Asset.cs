@@ -1,5 +1,8 @@
 using System;
+using System.Collections.Generic;
+using System.Text;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace GLTF.Schema
 {
@@ -27,6 +30,8 @@ namespace GLTF.Schema
 		/// The minimum glTF version that this asset targets.
 		/// </summary>
 		public string MinVersion;
+		
+		public Dictionary<string, JToken> PluginExtras = new Dictionary<string, JToken>();
 
 		public Asset()
 		{
@@ -97,9 +102,58 @@ namespace GLTF.Schema
 			writer.WritePropertyName("version");
 			writer.WriteValue(Version);
 
+			if (PluginExtras.Count > 0)
+			{
+				writer.WritePropertyName("extras");
+				writer.WriteStartObject();
+				writer.WritePropertyName("plugins");
+				foreach (var extra in PluginExtras)
+				{
+					writer.WriteStartObject();
+					writer.WritePropertyName(extra.Key);
+					extra.Value.WriteTo(writer);
+					writer.WriteEndObject();
+				}
+				writer.WriteEndObject();
+			}
+			
 			base.Serialize(writer);
 
 			writer.WriteEndObject();
+		}
+
+		public override string ToString()
+		{
+			return ToString(false);
+		}
+		
+		public string ToString(bool richFormat)
+		{
+			string bStart = richFormat ? "<b>" : "";
+			string bEnd = richFormat ? "</b>" : "";
+			
+			var sb = new StringBuilder();
+			if (!string.IsNullOrEmpty(Generator))
+				sb.AppendLine($"{bStart}{nameof(Generator)}: {bEnd}{Generator}");
+			
+			if (!string.IsNullOrEmpty(Version))
+				sb.AppendLine($"{bStart}{nameof(Version)}: {bEnd}{Version}");
+			
+			if (!string.IsNullOrEmpty(MinVersion))
+				sb.AppendLine($"{bStart}{nameof(MinVersion)}: {bEnd}{MinVersion}");
+			
+			if (!string.IsNullOrEmpty(Copyright))
+				sb.AppendLine($"{bStart}{nameof(Copyright)}: {bEnd}{Copyright}");
+			    
+			if (PluginExtras != null)
+			{
+				sb.AppendLine("");
+				sb.AppendLine($"{bStart}Extras: {bEnd}");
+				foreach (var extra in PluginExtras)
+					sb.AppendLine(extra.ToString());
+			}
+
+			return sb.ToString();
 		}
 	}
 }

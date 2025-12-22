@@ -6,13 +6,17 @@ using UnityEngine;
 using UnityGLTF.Cache;
 using UnityGLTF.Extensions;
 using UnityGLTF.Plugins;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 namespace UnityGLTF
 {
 	public partial class GLTFSceneImporter
 	{
 		internal static List<Texture> _runtimeNormalTextures = new List<Texture>();
-
+		internal List<object> _warnOnce = new List<object>();
+		
 		protected virtual async Task ConstructMaterial(GLTFMaterial def, int materialIndex)
 		{
 			IUniformMap mapper;
@@ -100,8 +104,8 @@ namespace UnityGLTF
 			mapper.AlphaMode = def.AlphaMode;
 			mapper.AlphaCutoff = def.AlphaCutoff;
 			mapper.DoubleSided = def.DoubleSided;
-			mapper.Material.SetFloat("_BUILTIN_QueueControl", -1);
-			mapper.Material.SetFloat("_QueueControl", -1);
+			mapper.Material.SetFloat("_BUILTIN_QueueControl", 0);
+			mapper.Material.SetFloat("_QueueControl", 0);
 
 #if UNITY_EDITOR
 			if (Context.SourceImporter == null)
@@ -112,7 +116,27 @@ namespace UnityGLTF
 			{
 				MatHelper.SetKeyword(mapper.Material, "_TEXTURE_TRANSFORM", true);
 			}
-
+			
+#if UNITY_EDITOR
+			var tempMapper = mapper;
+			
+			// Check if the material is valid – broken Shader Graphs import as single-pass magenta shaders...
+			var seemsToBeBroken = mapper.Material.shader?.passCount <= 1;
+			if (seemsToBeBroken)
+			{
+				var key = (mapper.Material.shader, Context?.SourceImporter);
+				if (!_warnOnce.Contains(key))
+				{
+					Debug.Log(LogType.Error, 
+						(object) $"glTF materials could not be correctly imported because there is an error with shader \"{mapper.Material.shader?.name}\". This is likely caused by Shader Graph keyword limits being too low; increase the Shader Variant Limit in \"Preferences > Shader Graph\", reimport the UnityGLTF package, and then reimport this file.\n\n", Context?.SourceImporter);
+					_warnOnce.Add(key);
+				}
+				// Set mapper to null so we're not trying to set any material properties and causing errors.
+				// We're restoring it right before creating the material.
+				mapper = null;
+			}
+#endif
+			
 			var mrMapper = mapper as IMetalRoughUniformMap;
 			if (def.PbrMetallicRoughness != null && mrMapper != null)
 			{
@@ -192,6 +216,8 @@ namespace UnityGLTF
 			var KHR_materials_clearcoat = settings && settings.KHR_materials_clearcoat;
 			var KHR_materials_pbrSpecularGlossiness = settings && settings.KHR_materials_pbrSpecularGlossiness;
 			var KHR_materials_emissive_strength = settings && settings.KHR_materials_emissive_strength;
+			var KHR_materials_sheen = settings && settings.KHR_materials_sheen;
+			var KHR_materials_anisotropy = settings && settings.KHR_materials_anisotropy;
 			// ReSharper restore InconsistentNaming
 
 			var sgMapper = mapper as ISpecGlossUniformMap;
@@ -298,6 +324,100 @@ namespace UnityGLTF
 				}
 			}
 
+			var sheenMapper = mapper as ISheenMap;
+			if (sheenMapper != null && KHR_materials_sheen)
+			{
+				var sheen = GetSheen(def);
+				if (sheen != null)
+				{
+					sheenMapper.SheenColorFactor = sheen.sheenColorFactor.ToUnityColorRaw();
+					sheenMapper.SheenRoughnessFactor = sheen.sheenRoughnessFactor;
+					MatHelper.SetKeyword(mapper.Material, "_SHEEN", true);
+					
+					if (sheen.sheenColorTexture != null)
+					{
+						var td = await FromTextureInfo(sheen.sheenColorTexture, false);
+						sheenMapper.SheenColorTexture = td.Texture;
+						sheenMapper.SheenColorTextureTexCoord = td.TexCoord;
+						var ext = GetTextureTransform(sheen.sheenColorTexture);
+						if (ext != null)
+						{
+							CalculateYOffsetAndScale(sheen.sheenColorTexture.Index, ext, out var scale, out var offset);
+							sheenMapper.SheenColorTextureOffset = offset;
+							sheenMapper.SheenColorTextureScale = scale;
+							sheenMapper.SheenColorTextureRotation = td.Rotation;
+							if (td.TexCoordExtra != null) sheenMapper.SheenColorTextureTexCoord = td.TexCoordExtra.Value;
+							SetTransformKeyword();
+						}
+						else if (IsTextureFlipped(sheen.sheenColorTexture.Index.Value))
+						{
+							sheenMapper.SheenColorTextureScale = new Vector2(1f,-1f);
+							sheenMapper.SheenColorTextureOffset = new Vector2(0f, 1f);
+							SetTransformKeyword();
+						}
+					}
+					
+					if (sheen.sheenRoughnessTexture != null)
+					{
+						var td = await FromTextureInfo(sheen.sheenRoughnessTexture, false);
+						sheenMapper.SheenRoughnessTexture = td.Texture;
+						sheenMapper.SheenColorTextureTexCoord = td.TexCoord;
+						var ext = GetTextureTransform(sheen.sheenRoughnessTexture);
+						if (ext != null)
+						{
+							CalculateYOffsetAndScale(sheen.sheenRoughnessTexture.Index, ext, out var scale, out var offset);
+							sheenMapper.SheenRoughnessTextureOffset = offset;
+							sheenMapper.SheenRoughnessTextureScale = scale;
+							sheenMapper.SheenRoughnessTextureRotation = td.Rotation;
+							if (td.TexCoordExtra != null) sheenMapper.SheenRoughnessTextureTexCoord = td.TexCoordExtra.Value;
+							SetTransformKeyword();
+						}
+						else if (IsTextureFlipped(sheen.sheenRoughnessTexture.Index.Value))
+						{
+							sheenMapper.SheenRoughnessTextureScale = new Vector2(1f,-1f);
+							sheenMapper.SheenRoughnessTextureOffset = new Vector2(0f, 1f);
+							SetTransformKeyword();
+						}
+					}
+				}
+			}
+			
+			var anisotropyMapper = mapper as IAnisotropyMap;
+			if (anisotropyMapper != null && KHR_materials_anisotropy)
+			{
+				var anisotropy = GetAnisotropy(def);
+				if (anisotropy != null)
+				{
+					anisotropyMapper.anisotropyRotation = anisotropy.anisotropyRotation;
+					anisotropyMapper.anisotropyStrength = anisotropy.anisotropyStrength;
+					
+					MatHelper.SetKeyword(mapper.Material, "_ANISOTROPY", true );
+					
+					if (anisotropy.anisotropyTexture != null)
+					{
+						var td = await FromTextureInfo(anisotropy.anisotropyTexture, false);
+						anisotropyMapper.anisotropyTexture = td.Texture;
+						anisotropyMapper.anisotropyTextureTexCoord = td.TexCoord;
+						var ext = GetTextureTransform(anisotropy.anisotropyTexture);
+						if (ext != null)
+						{
+							CalculateYOffsetAndScale(anisotropy.anisotropyTexture.Index, ext, out var scale, out var offset);
+							anisotropyMapper.anisotropyTextureOffset = offset;
+							anisotropyMapper.anisotropyTextureScale = scale;
+							anisotropyMapper.anisotropyTextureRotation = td.Rotation;
+							if (td.TexCoordExtra != null) anisotropyMapper.anisotropyTextureTexCoord = td.TexCoordExtra.Value;
+							SetTransformKeyword();
+						}
+						else if (IsTextureFlipped(anisotropy.anisotropyTexture.Index.Value))
+						{
+							anisotropyMapper.anisotropyTextureScale = new Vector2(1f,-1f);
+							anisotropyMapper.anisotropyTextureOffset = new Vector2(0f, 1f);
+							SetTransformKeyword();
+						}
+					}
+				}
+			}
+			
 			var transmissionMapper = mapper as ITransmissionMap;
 			if (transmissionMapper != null && KHR_materials_transmission)
 			{
@@ -330,6 +450,9 @@ namespace UnityGLTF
 					}
 
 					mapper.Material.renderQueue = 3000;
+#if UNITY_VISIONOS
+					mapper.AlphaMode = AlphaMode.BLEND;
+#endif
 					bool hasDispersion = false;
 					if (transmissionMapper is IDispersionMap dispersionMapper)
 					{
@@ -361,6 +484,9 @@ namespace UnityGLTF
 				var volume = GetVolume(def);
 				if (volume != null)
 				{
+#if UNITY_VISIONOS
+					mapper.AlphaMode = AlphaMode.BLEND;
+#endif
 					volumeMapper.AttenuationColor = QualitySettings.activeColorSpace == ColorSpace.Linear ? volume.attenuationColor.ToUnityColorLinear() : volume.attenuationColor.ToUnityColorRaw();
 					volumeMapper.AttenuationDistance = volume.attenuationDistance;
 					volumeMapper.ThicknessFactor = volume.thicknessFactor;
@@ -614,12 +740,13 @@ namespace UnityGLTF
 					TextureId textureId = def.NormalTexture.Index;
 					await ConstructTexture(textureId.Value, textureId.Id, !KeepCPUCopyOfTexture, true, true);
 
-					uniformMapper.NormalTexture = _assetCache.TextureCache[textureId.Id].Texture;
+					var tex = _assetCache.TextureCache[textureId.Id].Texture;
+					uniformMapper.NormalTexture = tex;
 					uniformMapper.NormalTexCoord = def.NormalTexture.TexCoord;
 					uniformMapper.NormalTexScale = def.NormalTexture.Scale;
 
-					_runtimeNormalTextures.Add(uniformMapper.NormalTexture);
-
+					if (tex) _runtimeNormalTextures.Add(tex);
+					
 					var ext = GetTextureTransform(def.NormalTexture);
 					if (ext != null)
 					{
@@ -690,8 +817,9 @@ namespace UnityGLTF
 					}
 				}
 
-				// ??
-				uniformMapper.EmissiveFactor = QualitySettings.activeColorSpace == ColorSpace.Linear ? def.EmissiveFactor.ToUnityColorLinear() : def.EmissiveFactor.ToUnityColorLinear();
+				// Set emissive factor in correct color space
+				var emissiveFactor = QualitySettings.activeColorSpace == ColorSpace.Linear ? def.EmissiveFactor.ToUnityColorLinear() : def.EmissiveFactor.ToUnityColorLinear();
+				uniformMapper.EmissiveFactor = emissiveFactor;
 
 				var emissiveExt = GetEmissiveStrength(def);
 				if (emissiveExt != null && KHR_materials_emissive_strength)
@@ -699,6 +827,12 @@ namespace UnityGLTF
 					uniformMapper.EmissiveFactor = uniformMapper.EmissiveFactor * emissiveExt.emissiveStrength;
 				}
 			}
+
+#if UNITY_EDITOR
+			// Restore the mapper if we had to remove it because the shader is broken...
+			if (mapper == null) mapper = tempMapper;
+#endif
+			
 			var vertColorMapper = mapper.Clone();
 			vertColorMapper.VertexColorsEnabled = true;
 
@@ -851,6 +985,30 @@ namespace UnityGLTF
 				}
 			}
 
+			if (def.Extensions != null && def.Extensions.ContainsKey(KHR_materials_sheen_Factory.EXTENSION_NAME))
+			{
+				var sheenDef = (KHR_materials_sheen)def.Extensions[KHR_materials_sheen_Factory.EXTENSION_NAME];
+				if (sheenDef.sheenColorTexture != null)
+				{
+					var textureId = sheenDef.sheenColorTexture.Index;
+					tasks.Add(ConstructImageBuffer(textureId.Value, textureId.Id));
+				}
+				if (sheenDef.sheenRoughnessTexture != null)
+				{
+					var textureId = sheenDef.sheenRoughnessTexture.Index;
+					tasks.Add(ConstructImageBuffer(textureId.Value, textureId.Id));
+				}
+			}
+			
+			if (def.Extensions != null && def.Extensions.ContainsKey(KHR_materials_anisotropy_Factory.EXTENSION_NAME))
+			{
+				var ansiDef = (KHR_materials_anisotropy)def.Extensions[KHR_materials_anisotropy_Factory.EXTENSION_NAME];
+				if (ansiDef.anisotropyTexture != null)
+				{
+					var textureId = ansiDef.anisotropyTexture.Index;
+					tasks.Add(ConstructImageBuffer(textureId.Value, textureId.Id));
+				}
+			}
 
 			if (def.Extensions != null && def.Extensions.ContainsKey(KHR_materials_clearcoat_Factory.EXTENSION_NAME))
 			{
@@ -907,7 +1065,27 @@ namespace UnityGLTF
 			}
 			return null;
 		}
-
+		
+		protected virtual KHR_materials_sheen GetSheen(GLTFMaterial def)
+		{
+			if (_gltfRoot.ExtensionsUsed != null && _gltfRoot.ExtensionsUsed.Contains(KHR_materials_sheen_Factory.EXTENSION_NAME) &&
+			    def.Extensions != null && def.Extensions.TryGetValue(KHR_materials_sheen_Factory.EXTENSION_NAME, out var extension))
+			{
+				return (KHR_materials_sheen) extension;
+			}
+			return null;
+		}
+		
+		protected virtual KHR_materials_anisotropy GetAnisotropy(GLTFMaterial def)
+		{
+			if (_gltfRoot.ExtensionsUsed != null && _gltfRoot.ExtensionsUsed.Contains(KHR_materials_anisotropy_Factory.EXTENSION_NAME) &&
+			    def.Extensions != null && def.Extensions.TryGetValue(KHR_materials_anisotropy_Factory.EXTENSION_NAME, out var extension))
+			{
+				return (KHR_materials_anisotropy) extension;
+			}
+			return null;
+		}
+		
 		protected virtual KHR_materials_dispersion GetDispersion(GLTFMaterial def)
 		{
 			if (_gltfRoot.ExtensionsUsed != null && _gltfRoot.ExtensionsUsed.Contains(KHR_materials_dispersion_Factory.EXTENSION_NAME) &&

@@ -14,7 +14,9 @@ namespace UnityGLTF.Plugins
 		public bool KHR_materials_specular = true;
 		public bool KHR_materials_clearcoat = true;
 		public bool KHR_materials_emissive_strength = true;
-
+		public bool KHR_materials_sheen = true;
+		public bool KHR_materials_anisotropy = true;
+		
 		public override GLTFExportPluginContext CreateInstance(ExportContext context)
 		{
 			return new MaterialExtensionsExportContext(this);
@@ -30,6 +32,8 @@ namespace UnityGLTF.Plugins
 - KHR_materials_specular
 - KHR_materials_clearcoat
 - KHR_materials_emissive_strength
+- KHR_materials_sheen
+- KHR_materials_anisotropy
 ";
 	}
 	
@@ -69,18 +73,37 @@ namespace UnityGLTF.Plugins
 		private static readonly int clearcoatRoughnessTexture = Shader.PropertyToID("clearcoatRoughnessTexture");
 		private static readonly int clearcoatNormalTexture = Shader.PropertyToID("clearcoatNormalTexture");
 
+		private static readonly int sheenColorFactor = Shader.PropertyToID("sheenColorFactor");
+		private static readonly int sheenRoughnessFactor = Shader.PropertyToID("sheenRoughnessFactor");
+		private static readonly int sheenColorTexture = Shader.PropertyToID("sheenColorTexture");
+		private static readonly int sheenRoughnessTexture = Shader.PropertyToID("sheenRoughnessTexture");
+		
+		private static readonly int anisotropyStrength = Shader.PropertyToID("anisotropyStrength");
+		private static readonly int anisotropyRotation = Shader.PropertyToID("anisotropyRotation");
+		private static readonly int anisotropyTexture = Shader.PropertyToID("anisotropyTexture");
+		
 
 		public override void AfterMaterialExport(GLTFSceneExporter exporter, GLTFRoot gltfroot, Material material, GLTFMaterial materialnode)
 		{
 			if (!material) return;
 
 			var usesTransmission = material.IsKeywordEnabled("_VOLUME_TRANSMISSION_ON") || material.IsKeywordEnabled("_VOLUME_TRANSMISSION_ANDDISPERSION");
+			if (materialnode.AlphaMode == AlphaMode.BLEND
+			    && material.HasFloat("_BlendModePreserveSpecular")
+			    && material.GetFloat("_BlendModePreserveSpecular") == 1)
+			{
+				usesTransmission = true;
+				
+			}
+			
 			var usesDispersion = material.IsKeywordEnabled("_VOLUME_TRANSMISSION_ANDDISPERSION");
 			var usesVolume = material.HasProperty("_VOLUME_ON") && material.GetFloat("_VOLUME_ON") > 0.5f;
 			var hasNonDefaultIor = material.HasProperty(ior) && !Mathf.Approximately(material.GetFloat(ior), KHR_materials_ior.DefaultIor);
 			var usesIridescence = material.IsKeywordEnabled("_IRIDESCENCE_ON");
 			var usesSpecular = material.IsKeywordEnabled("_SPECULAR_ON");
 			var usesClearcoat = material.IsKeywordEnabled("_CLEARCOAT_ON");
+			var usesSheen = material.IsKeywordEnabled("_SHEEN_ON");
+			var usesAnisotropy = material.IsKeywordEnabled("_ANISOTROPY_ON") || (material.HasFloat("_ANISOTROPY") && material.GetFloat("_ANISOTROPY") > 0.5f);
 			
 			if (hasNonDefaultIor && settings.KHR_materials_ior)
 			{
@@ -97,6 +120,27 @@ namespace UnityGLTF.Plugins
 
 				if (material.HasProperty(ior))
 					vi.ior = material.GetFloat(ior);
+			}
+			
+			if (usesAnisotropy && settings.KHR_materials_anisotropy)
+			{
+				if (materialnode.Extensions == null)
+					materialnode.Extensions = new Dictionary<string, IExtension>();
+
+				var aniso = new KHR_materials_anisotropy();
+				if (materialnode.Extensions.TryGetValue(KHR_materials_anisotropy_Factory.EXTENSION_NAME, out var vv1))
+					aniso = (KHR_materials_anisotropy) vv1;
+				else
+					materialnode.Extensions.Add(KHR_materials_anisotropy_Factory.EXTENSION_NAME, aniso);
+
+				exporter.DeclareExtensionUsage(KHR_materials_anisotropy_Factory.EXTENSION_NAME, false);
+
+				if (material.HasProperty(anisotropyRotation))
+					aniso.anisotropyRotation = material.GetFloat(anisotropyRotation);
+				if (material.HasProperty(anisotropyStrength))
+					aniso.anisotropyStrength = material.GetFloat(anisotropyStrength);
+				if (material.HasProperty(anisotropyTexture) && material.GetTexture(anisotropyTexture))
+					aniso.anisotropyTexture = exporter.ExportTextureInfoWithTextureTransform(material, material.GetTexture(anisotropyTexture), nameof(anisotropyTexture));
 			}
 
 			if (usesTransmission && settings.KHR_materials_transmission)
@@ -116,6 +160,22 @@ namespace UnityGLTF.Plugins
 
 				if (material.HasProperty(transmissionFactor))
 					vt.transmissionFactor = material.GetFloat(transmissionFactor);
+				else
+				{
+					if (materialnode.PbrMetallicRoughness != null)
+					{
+						// Special case when we add transmission because of alpha mode blend with preserved specular
+						
+						vt.transmissionFactor = 1f - materialnode.PbrMetallicRoughness.BaseColorFactor.A;
+						if (!materialnode.Extensions.ContainsKey(KHR_materials_ior_Factory.EXTENSION_NAME))
+						{
+							var vi = new KHR_materials_ior();
+							materialnode.Extensions.Add(KHR_materials_ior_Factory.EXTENSION_NAME, vi);
+							exporter.DeclareExtensionUsage(KHR_materials_ior_Factory.EXTENSION_NAME, false);
+							vi.ior = 1;
+						}
+					}
+				}
 				if (material.HasProperty(transmissionTexture) && material.GetTexture(transmissionTexture))
 					vt.transmissionTexture = exporter.ExportTextureInfoWithTextureTransform(material, material.GetTexture(transmissionTexture), nameof(transmissionTexture));
 
@@ -239,6 +299,31 @@ namespace UnityGLTF.Plugins
 					cc.clearcoatRoughnessTexture = exporter.ExportTextureInfoWithTextureTransform(material, material.GetTexture(clearcoatRoughnessTexture), nameof(clearcoatRoughnessTexture));
 				if (material.HasProperty(clearcoatNormalTexture))
 					cc.clearcoatNormalTexture = exporter.ExportTextureInfoWithTextureTransform(material, material.GetTexture(clearcoatNormalTexture), nameof(clearcoatNormalTexture));
+			}
+			
+			if (usesSheen && settings.KHR_materials_sheen)
+			{
+				exporter.DeclareExtensionUsage(KHR_materials_sheen_Factory.EXTENSION_NAME, false);
+
+				if (materialnode.Extensions == null)
+					materialnode.Extensions = new Dictionary<string, IExtension>();
+
+				var cc = new KHR_materials_sheen();
+
+				if (materialnode.Extensions.TryGetValue(KHR_materials_sheen_Factory.EXTENSION_NAME, out var vv0))
+					cc = (KHR_materials_sheen) vv0;
+				else
+					materialnode.Extensions.Add(KHR_materials_sheen_Factory.EXTENSION_NAME, cc);
+
+				if (material.HasProperty(sheenColorFactor))
+					cc.sheenColorFactor = material.GetColor(sheenColorFactor).ToNumericsColorRaw();
+				if (material.HasProperty(sheenColorTexture))
+					cc.sheenColorTexture = exporter.ExportTextureInfoWithTextureTransform(material, material.GetTexture(sheenColorTexture), nameof(sheenColorTexture));
+				
+				if (material.HasProperty(sheenRoughnessFactor))
+					cc.sheenRoughnessFactor = material.GetFloat(sheenRoughnessFactor);
+				if (material.HasProperty(sheenRoughnessTexture))
+					cc.sheenRoughnessTexture = exporter.ExportTextureInfoWithTextureTransform(material, material.GetTexture(sheenRoughnessTexture), nameof(sheenRoughnessTexture));
 			}
 		}
 	}

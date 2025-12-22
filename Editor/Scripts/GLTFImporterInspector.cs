@@ -8,6 +8,7 @@ using JetBrains.Annotations;
 using UnityEditor;
 
 using UnityEngine;
+using UnityEngine.Rendering;
 #if UNITY_2020_2_OR_NEWER
 using UnityEditor.AssetImporters;
 using UnityGLTF.Plugins;
@@ -23,7 +24,7 @@ namespace UnityGLTF
 	internal class GLTFImporterInspector : UnityGLTFTabbedEditor
 	{
 		private string[] _importNormalsNames;
-
+		
 		public override void OnEnable()
 		{
 			if (!this) return;
@@ -39,7 +40,8 @@ namespace UnityGLTF
 			if (m_HasMaterialData.boolValue || m_HasTextureData.boolValue)
 				AddTab(new GLTFAssetImporterTab(this, "Materials", MaterialInspectorGUI));
 
-			AddTab(new GLTFAssetImporterTab(this, "Used Extensions", ExtensionInspectorGUI));
+			AddTab(new GLTFAssetImporterTab(this, "Extensions", ExtensionInspectorGUI));
+			AddTab(new GLTFAssetImporterTab(this, "Info", AssetInfoInspectorGUI));
 
 			base.OnEnable();
 		}
@@ -81,12 +83,23 @@ namespace UnityGLTF
 			EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(GLTFImporter._removeEmptyRootObjects)));
 			EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(GLTFImporter._scaleFactor)));
 			EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(GLTFImporter._importCamera)));
+			EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(GLTFImporter._deduplicateResources)));
 			// EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(GLTFImporter._maximumLod)), new GUIContent("Maximum Shader LOD"));
 			EditorGUILayout.Separator();
 			
 			EditorGUILayout.LabelField("Meshes", EditorStyles.boldLabel);
 			EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(GLTFImporter._readWriteEnabled)), new GUIContent("Read/Write"));
-			EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(GLTFImporter._generateColliders)));
+
+#pragma warning disable 0618	
+			if (t._generateColliders)
+			{
+				serializedObject.FindProperty(nameof(GLTFImporter._addColliders)).enumValueIndex =
+					(int)GLTFSceneImporter.ColliderType.Mesh;
+				serializedObject.FindProperty(nameof(GLTFImporter._generateColliders)).boolValue = false;
+			}
+#pragma warning restore 0618
+			EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(GLTFImporter._addColliders)));
+			
 			EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(GLTFImporter._importBlendShapeNames)));
 			EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(GLTFImporter._blendShapeFrameWeight)));
 			
@@ -144,6 +157,13 @@ namespace UnityGLTF
 			
 			var anim = serializedObject.FindProperty(nameof(GLTFImporter._importAnimations));
 			EditorGUILayout.PropertyField(anim, new GUIContent("Animation Type"));
+			if (anim.enumValueIndex == (int)AnimationMethod.MecanimHumanoid)
+			{
+				var flip = serializedObject.FindProperty(nameof(GLTFImporter._mecanimHumanoidFlip));
+				EditorGUI.indentLevel++;
+				EditorGUILayout.PropertyField(flip, new GUIContent("Flip Forward", "Some formats like VRM have a different forward direction for Avatars. Enable this option if the animation looks inverted."));
+				EditorGUI.indentLevel--;
+			}
 			if (hasAnimationData && anim.enumValueIndex > 0)
 			{
 				var loopTime = serializedObject.FindProperty(nameof(GLTFImporter._animationLoopTime));
@@ -179,10 +199,12 @@ namespace UnityGLTF
 
 			var importMaterialsProp = serializedObject.FindProperty(nameof(GLTFImporter._importMaterials));
 			EditorGUILayout.PropertyField(importMaterialsProp);
-			if (importMaterialsProp.boolValue)
+			if (importMaterialsProp.boolValue && GraphicsSettings.currentRenderPipeline)
 			{
 				EditorGUI.indentLevel++;
+				EditorGUI.BeginDisabledGroup(!GraphicsSettings.currentRenderPipeline);
 				EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(GLTFImporter._enableGpuInstancing)), new GUIContent("GPU Instancing"));
+				EditorGUI.EndDisabledGroup();
 				EditorGUI.indentLevel--;
 			}
 			var importedMaterials = serializedObject.FindProperty("m_Materials");
@@ -241,6 +263,32 @@ namespace UnityGLTF
 				// TODO this also counts old remaps that are not used anymore
 				var remapCount = externalObjectMap.Values.Count(x => x is T);
 
+				void ExtractAssets(T[] subAssets, bool importImmediately)
+				{
+					var assetPath = AssetDatabase.GetAssetPath(subAssets[0]);
+					var assetImporter = AssetImporter.GetAtPath(assetPath);
+					foreach (var subAsset in subAssets)
+					{
+						if (!subAsset) return;
+						var filename = SanitizePath(subAsset.name);
+						var dirName = Path.GetDirectoryName(t.assetPath) + "/" + subDirectoryName;
+						if (!Directory.Exists(dirName))
+							Directory.CreateDirectory(dirName);
+						var destinationPath = dirName + "/" + filename + fileExtension;
+
+						var clone = Instantiate(subAsset);
+						AssetDatabase.CreateAsset(clone, destinationPath);
+
+						assetImporter.AddRemap(new AssetImporter.SourceAssetIdentifier(subAsset), clone);
+					}
+
+					if (importImmediately)
+					{
+						AssetDatabase.WriteImportSettingsIfDirty(assetPath);
+						AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceUpdate);
+					}
+				}
+				
 				void ExtractAsset(T subAsset, bool importImmediately)
 				{
 					if (!subAsset) return;
@@ -269,10 +317,10 @@ namespace UnityGLTF
 				SessionState.SetBool(remapFoldoutKey, remapFoldout);
 				if (remapFoldout)
 				{
-					if (remapCount > 0)
-					{
-						EditorGUILayout.BeginHorizontal();
+					EditorGUILayout.BeginHorizontal();
 
+					using (new EditorGUI.DisabledScope(remapCount == 0))
+					{
 						if (GUILayout.Button("Restore all " + subDirectoryName))
 						{
 							for (var i = 0; i < importedData.arraySize; i++)
@@ -289,27 +337,27 @@ namespace UnityGLTF
 								t.RemoveRemap(oldRemap.Key);
 							}
 						}
-
-						if (typeof(T) == typeof(Material) && GUILayout.Button("Extract all " + subDirectoryName))
-						{
-							var materials = new T[importedData.arraySize];
-							for (var i = 0; i < importedData.arraySize; i++)
-								materials[i] = importedData.GetArrayElementAtIndex(i).objectReferenceValue as T;
-
-							for (var i = 0; i < materials.Length; i++)
-							{
-								if (!materials[i]) continue;
-								AssetDatabase.StartAssetEditing();
-								ExtractAsset(materials[i], false);
-								AssetDatabase.StopAssetEditing();
-								var assetPath = AssetDatabase.GetAssetPath(target);
-								AssetDatabase.WriteImportSettingsIfDirty(assetPath);
-								AssetDatabase.Refresh();
-							}
-						}
-
-						EditorGUILayout.EndHorizontal();
 					}
+
+					if (typeof(T) == typeof(Material) && GUILayout.Button("Extract all " + subDirectoryName))
+					{
+						var materials = new T[importedData.arraySize];
+						for (var i = 0; i < importedData.arraySize; i++)
+							materials[i] = importedData.GetArrayElementAtIndex(i).objectReferenceValue as T;
+
+						var extract = materials.Where(m => m != null).ToArray();
+						AssetDatabase.StartAssetEditing();
+						ExtractAssets(extract, false);
+						AssetDatabase.StopAssetEditing();
+						var assetPath = AssetDatabase.GetAssetPath(target);
+						AssetDatabase.WriteImportSettingsIfDirty(assetPath);
+						AssetDatabase.Refresh();
+						return;
+					}
+
+					EditorGUILayout.EndHorizontal();
+					EditorGUILayout.Space();
+
 
 					for (var i = 0; i < importedData.arraySize; i++)
 					{
@@ -362,16 +410,45 @@ namespace UnityGLTF
 			EditorGUILayout.EndFoldoutHeaderGroup();
 		}
 
+		private static GUIStyle _richTextWordWrap;
+		private void AssetInfoInspectorGUI()
+		{
+			var t = target as GLTFImporter;
+			if (!t) return;
+			var assetProp = serializedObject.FindProperty(nameof(GLTFImporter._gltfAsset));
+			if (assetProp == null)
+				return;
+
+			if (_richTextWordWrap == null)
+			{
+				GUIStyle style = new GUIStyle(GUI.skin.label);
+				style.richText = true;
+				style.wordWrap = true;
+				_richTextWordWrap = style;
+			}
+			
+			if (string.IsNullOrEmpty(t._gltfAsset))
+			{
+				EditorGUILayout.LabelField("<i>No asset information included in file</i>", _richTextWordWrap);
+				return;
+			}
+			
+			EditorGUILayout.Space();
+			var rect = GUILayoutUtility.GetRect(new GUIContent(t._gltfAsset), _richTextWordWrap);
+			EditorGUI.SelectableLabel(rect, t._gltfAsset, _richTextWordWrap);
+			
+			EditorGUILayout.Space();
+			EditorGUI.BeginDisabledGroup(true);
+			var mainAssetIdentifierProp = serializedObject.FindProperty(nameof(GLTFImporter._mainAssetIdentifier));
+			EditorGUILayout.PropertyField(mainAssetIdentifierProp);
+		}
+
 		private void ExtensionInspectorGUI()
 		{
 			var t = target as GLTFImporter;
 			if (!t) return;
 
-			EditorGUI.BeginDisabledGroup(true);
-			var mainAssetIdentifierProp = serializedObject.FindProperty(nameof(GLTFImporter._mainAssetIdentifier));
-			EditorGUILayout.PropertyField(mainAssetIdentifierProp);
-
-			EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(GLTFImporter._extensions)), new GUIContent("Extensions"));
+			EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(GLTFImporter._extensions)), new GUIContent("Extensions in file"));
 			EditorGUI.EndDisabledGroup();
 
 			// TODO add list of supported extensions and links to docs
@@ -379,6 +456,8 @@ namespace UnityGLTF
 			var registeredPlugins = GLTFSettings.GetDefaultSettings().ImportPlugins;
 			var overridePlugins = t._importPlugins;
 
+			EditorGUILayout.Space();
+			EditorGUILayout.LabelField("Available Import Plugins", EditorStyles.boldLabel);
 			EditorGUILayout.LabelField("OVERRIDE", EditorStyles.miniLabel, GUILayout.Width(60));
 			EditorGUILayout.BeginHorizontal();
 			EditorGUILayout.LabelField("", GUILayout.Width(16));
@@ -466,6 +545,34 @@ namespace UnityGLTF
 				}
 			}
 			return sb.ToString();
+		}
+
+		private static Editor cachedMateriaLibraryEditor;
+		public override void DrawPreview(Rect previewArea)
+		{
+			// Is the root object a MaterialLibrary? Then draw the preview of that.
+			// Otherwise, use base implementation.
+			// get the assetimporter target object:
+			if (assetTarget is MaterialLibrary materialLibrary)
+			{
+				var subassets = AssetDatabase.LoadAllAssetsAtPath(AssetDatabase.GetAssetPath(materialLibrary)).Where(x => x is Material).ToArray();
+				CreateCachedEditor(subassets, typeof(MaterialEditor), ref cachedMateriaLibraryEditor);
+				cachedMateriaLibraryEditor.DrawPreview(previewArea);
+			}
+			else
+			{
+				base.DrawPreview(previewArea);
+			}
+		}
+
+		protected override bool useAssetDrawPreview
+		{
+			get
+			{
+				if (assetTarget is MaterialLibrary)
+					return false;
+				return true;
+			}
 		}
 	}
 

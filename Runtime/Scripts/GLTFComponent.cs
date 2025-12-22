@@ -6,6 +6,7 @@ using System.Runtime.ExceptionServices;
 using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.Events;
+using UnityEngine.Serialization;
 using UnityGLTF.Loader;
 using UnityGLTF.Plugins;
 #if WINDOWS_UWP 
@@ -21,8 +22,8 @@ namespace UnityGLTF
 	{
 		public string GLTFUri = null;
 		public bool Multithreaded = true;
-		public bool UseStream = false;
-		public bool AppendStreamingAssets = true;
+		[FormerlySerializedAs("AppendStreamingAssets")] 
+		public bool LoadFromStreamingAssets = true;
 		public bool PlayAnimationOnLoad = true;
 		[Tooltip("Hide the scene object during load, then activate it when complete")]
 		public bool HideSceneObjDuringLoad = false;
@@ -33,14 +34,12 @@ namespace UnityGLTF
         public IEnumerable<Animation> Animations { get; private set; }
 #endif
 
-		[SerializeField]
-		private bool loadOnStart = true;
+		public bool loadOnStart = true;
 
 		[SerializeField] private int RetryCount = 10;
 		[SerializeField] private float RetryTimeout = 2.0f;
 		private int numRetries = 0;
-
-
+		
 		public int MaximumLod = 300;
 		public int Timeout = 8;
 		public GLTFSceneImporter.ColliderType Collider = GLTFSceneImporter.ColliderType.None;
@@ -48,14 +47,30 @@ namespace UnityGLTF
 
 		[SerializeField]
 		private Shader shaderOverride = null;
+		
+		public Shader ShaderOverride
+		{
+			get => shaderOverride;
+			set
+			{
+				shaderOverride = value;
+				ApplyOverrideShader();
+			}
+		}
 
 		[Header("Import Settings")]
+		public RuntimeTextureCompression TextureCompression = RuntimeTextureCompression.None;
 		public GLTFImporterNormals ImportNormals = GLTFImporterNormals.Import;
 		public GLTFImporterNormals ImportTangents = GLTFImporterNormals.Import;
 		public bool SwapUVs = false;
 		[Tooltip("Blend shape frame weight import multiplier. Default is 1. For compatibility with some FBX animations you may need to use 100.")]
 		public BlendShapeFrameWeightSetting blendShapeFrameWeight = new BlendShapeFrameWeightSetting(BlendShapeFrameWeightSetting.MultiplierOption.Multiplier1);
-
+		[Tooltip("When enabled, the CPU copy of the mesh will be kept in memory after the mesh has been uploaded to the GPU. This is useful if you want to modify the mesh at runtime.")]
+		public bool KeepCPUCopyOfMesh = true;
+		[Tooltip("When enabled, the CPU copy of the texture will be kept in memory after the texture has been uploaded to the GPU. This is useful if you want to modify the texture at runtime.")]
+		public bool KeepCPUCopyOfTexture = true;
+		
+		
 		private async void Start()
 		{
 			if (!loadOnStart) return;
@@ -86,7 +101,8 @@ namespace UnityGLTF
 				AsyncCoroutineHelper = gameObject.GetComponent<AsyncCoroutineHelper>() ?? gameObject.AddComponent<AsyncCoroutineHelper>(),
 				ImportNormals = ImportNormals,
 				ImportTangents = ImportTangents,
-				SwapUVs = SwapUVs
+				SwapUVs = SwapUVs,
+				RuntimeTextureCompression = TextureCompression,
 			};
 			
 			var settings = GLTFSettings.GetOrCreateSettings();
@@ -97,9 +113,9 @@ namespace UnityGLTF
 			{
 				if (!Factory) Factory = ScriptableObject.CreateInstance<DefaultImporterFactory>();
 
-                // UseStream is currently not supported...
                 string fullPath;
-                if (AppendStreamingAssets)
+                var isWebRequest = GLTFUri.StartsWith("http://", System.StringComparison.OrdinalIgnoreCase) || GLTFUri.StartsWith("https://", System.StringComparison.OrdinalIgnoreCase);
+                if (LoadFromStreamingAssets && !isWebRequest)
 	                fullPath = Path.Combine(Application.streamingAssetsPath, GLTFUri.TrimStart(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }));
                 else
 	                fullPath = GLTFUri;
@@ -117,7 +133,9 @@ namespace UnityGLTF
 				sceneImporter.Timeout = Timeout;
 				sceneImporter.IsMultithreaded = Multithreaded;
 				sceneImporter.CustomShaderName = shaderOverride ? shaderOverride.name : null;
-
+				sceneImporter.KeepCPUCopyOfTexture = KeepCPUCopyOfTexture;
+				sceneImporter.KeepCPUCopyOfMesh = KeepCPUCopyOfMesh;
+				
 				// for logging progress
 				await sceneImporter.LoadSceneAsync(
 					showSceneObj:!HideSceneObjDuringLoad,
@@ -130,22 +148,25 @@ namespace UnityGLTF
 				);
 
 				// Override the shaders on all materials if a shader is provided
-				if (shaderOverride != null)
-				{
-					Renderer[] renderers = gameObject.GetComponentsInChildren<Renderer>();
-					foreach (Renderer renderer in renderers)
-					{
-						renderer.sharedMaterial.shader = shaderOverride;
-					}
-				}
+				ApplyOverrideShader();
 
 				LastLoadedScene = sceneImporter.LastLoadedScene;
-				
-				if (HideSceneObjDuringLoad)
+
+				if (HideSceneObjDuringLoad && LastLoadedScene)
+				{
 					LastLoadedScene.SetActive(true);
+				}
 
 #if UNITY_ANIMATION
-				Animations = sceneImporter.LastLoadedScene.GetComponents<Animation>();
+				if (LastLoadedScene)
+				{
+					Animations = LastLoadedScene.GetComponents<Animation>();
+				}
+				else
+				{
+					Animations = System.Array.Empty<Animation>();
+				}
+				
 
 				if (PlayAnimationOnLoad && Animations.Any())
 				{
@@ -160,6 +181,18 @@ namespace UnityGLTF
 					sceneImporter?.Dispose();
 					sceneImporter = null;
 					importOptions.DataLoader = null;
+				}
+			}
+		}
+		
+		public void ApplyOverrideShader()
+		{
+			if (shaderOverride != null)
+			{
+				Renderer[] renderers = gameObject.GetComponentsInChildren<Renderer>();
+				foreach (Renderer renderer in renderers)
+				{
+					renderer.sharedMaterial.shader = shaderOverride;
 				}
 			}
 		}

@@ -92,10 +92,15 @@ namespace UnityGLTF
 				var blendMode = material.GetInt(blendModeProp);
 				isImplicitBlendMode = blendMode == 0;
 			}
-
+#if UNITY_VISIONOS
+			// VisionOS doesn't support our roughness opaque rendererfeature,
+			// so on material import we set Volume/Transmission Materials to Transparent
+			isImplicitBlendMode = false;
+#endif
 			if (isImplicitBlendMode)
 			{
-				if (material.IsKeywordEnabled("_VOLUME_TRANSMISSION_ON"))
+				if (material.IsKeywordEnabled("_VOLUME_TRANSMISSION_ON")
+				    || material.IsKeywordEnabled("_VOLUME_TRANSMISSION_ANDDISPERSION"))
 				{
 					// We want to enforce opaque rendering if
 					// - Transmission is enabled
@@ -256,7 +261,7 @@ class Convert_<OldShader>_to_GLTF
 		// Example:
 		// if (material.GetFloat(""_VERTEX_COLORS"") > 0.5f) material.EnableKeyword(""_VERTEX_COLORS_ON"");
 
-		ShaderGraphHelpers.ValidateMaterialKeywords(material);
+		GLTFMaterialHelper.ValidateMaterialKeywords(material);
 		return true;
 	}
 }

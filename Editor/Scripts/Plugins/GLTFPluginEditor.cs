@@ -29,8 +29,10 @@ namespace UnityGLTF
         public override void OnInspectorGUI()
         {
             base.OnInspectorGUI();
+            bool wasEnabled = GUI.enabled;
+            GUI.enabled = true;
             var t = target as GLTFPlugin;
-            if (!t || string.IsNullOrEmpty(t.Warning))
+            if (!t || !t.PackageMissing)
             {
                 var rect = GUILayoutUtility.GetLastRect();
                 if (Event.current.type == EventType.ContextClick && rect.Contains(Event.current.mousePosition))
@@ -43,11 +45,13 @@ namespace UnityGLTF
                     Event.current.Use();
                 }
 
+                GUI.enabled = wasEnabled;
                 return;
             }
             
             if (isInstalling)
             {
+                GUI.enabled = wasEnabled;
                 EditorGUI.BeginDisabledGroup(true);
                 GUILayout.Button("Installing...");
                 EditorGUI.EndDisabledGroup();
@@ -79,6 +83,7 @@ namespace UnityGLTF
                 EditorApplication.update += WatchInstall;
             }
             EditorGUI.indentLevel--;
+            GUI.enabled = wasEnabled;
         }
     }
     

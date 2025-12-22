@@ -1,4 +1,7 @@
+using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using UnityEditor;
 using UnityEngine;
 
@@ -10,9 +13,31 @@ namespace UnityGLTF
 		private static void ConnectGltfExporterToPbrGraphGUI()
 		{
 			PBRGraphGUI.ImmutableMaterialChanged += OnImmutableMaterialChanged;
+			PBRGraphGUI.IsMaterialEditable += IsMaterialEditable;
 		}
+		
+		internal static bool IsMaterialEditable(Material material)
+		{
+			if (!material) return false;
+			if (!AssetDatabase.Contains(material)) return false;
 
-		private static void OnImmutableMaterialChanged(Material material)
+			var assetPath = AssetDatabase.GetAssetPath(material);
+			if (!assetPath.EndsWith(".gltf", StringComparison.OrdinalIgnoreCase))
+			{
+				// If the material is not part of a GLTF asset, we don't want to edit it.
+				return false;
+			}
+			
+			var mainAssetType = AssetDatabase.GetMainAssetTypeAtPath(assetPath);
+			if (mainAssetType != typeof(Material) && mainAssetType != typeof(MaterialLibrary))
+			{
+				return false;
+			}
+
+			return true;
+		}
+		
+		internal static void OnImmutableMaterialChanged(Material material)
 		{
 			if (!material) return;
 			if (!AssetDatabase.Contains(material)) return;
@@ -23,20 +48,23 @@ namespace UnityGLTF
 			// var mainAsset = AssetDatabase.LoadMainAssetAtPath(assetPath);
 
 			// Transform[] rootTransforms = null;
-			var exporter = new GLTFSceneExporter((Transform[]) null, new ExportContext());
-			// load all materials from mainAsset
 			var importer = AssetImporter.GetAtPath(assetPath) as GLTFImporter;
 			if (!importer) return;
+			var materialsToExport = importer.m_Materials.Where(x => x is Material).Cast<Material>().ToList();
+
+			SaveAssetWithMaterials(assetPath, materialsToExport);
+		}
+		
+		internal static void SaveAssetWithMaterials(string assetPath, List<Material> materials)
+		{
+			var importer = AssetImporter.GetAtPath(assetPath) as GLTFImporter;
+			var exporter = new GLTFSceneExporter((Transform[]) null, new ExportContext());
+			// load all materials from mainAsset
 
 			// var allObjects = AssetDatabase.LoadAllAssetsAtPath(assetPath);
-			foreach (var obj in importer.m_Materials)
+			foreach (var mat in materials)
 			{
-				if (!(obj is Material mat))
-				{
-					// TODO warn that there are extra objects we can't store right now
-					continue;
-				}
-
+				if (!mat) continue;
 				exporter.ExportMaterial(mat);
 			}
 
@@ -54,7 +82,7 @@ namespace UnityGLTF
 			var importedTextures = importer.m_Textures;
 			// If these don't match, we could only try by name... not ideal.
 			// They may not match due to different sampler settings etc.
-			if (exportedTextures.Count == importedTextures.Length)
+			if (exportedTextures?.Count == importedTextures.Length)
 			{
 				for (int i = 0; i < exportedTextures.Count; i++)
 				{
@@ -81,7 +109,7 @@ namespace UnityGLTF
 			// after importing a changed material, which can be confusing. Could be caching inside PBRGraphGUI
 			AssetDatabase.Refresh();
 
-			EditorApplication.update += () =>
+			EditorApplication.delayCall += () =>
 			{
 				// Repaint Inspector, newly imported values can be different if we're not perfectly round tripping
 				foreach (var editor in ActiveEditorTracker.sharedTracker.activeEditors)
@@ -90,5 +118,6 @@ namespace UnityGLTF
 				}
 			};
 		}
+		
 	}
 }

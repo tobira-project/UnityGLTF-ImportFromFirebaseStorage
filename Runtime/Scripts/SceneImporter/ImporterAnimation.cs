@@ -61,24 +61,24 @@ namespace UnityGLTF
 				samplers[i].Interpolation = samplerDef.Interpolation;
 
 				// set up input accessors
-				BufferCacheData inputBufferCacheData = await GetBufferData(samplerDef.Input.Value.BufferView.Value.Buffer);
+				BufferCacheData inputBufferCacheData = await GetBufferData(samplerDef.Input.Value.BufferView?.Value?.Buffer);
 				AttributeAccessor attributeAccessor = new AttributeAccessor
 				{
 					AccessorId = samplerDef.Input,
-					bufferData = inputBufferCacheData.bufferData,
-					Offset = inputBufferCacheData.ChunkOffset
+					bufferData = inputBufferCacheData?.bufferData ?? default,
+					Offset = inputBufferCacheData?.ChunkOffset ?? 0,
 				};
 
 				samplers[i].Input = attributeAccessor;
 				samplersByType["time"].Add(attributeAccessor);
 
 				// set up output accessors
-				BufferCacheData outputBufferCacheData = await GetBufferData(samplerDef.Output.Value.BufferView.Value.Buffer);
+				BufferCacheData outputBufferCacheData = await GetBufferData(samplerDef.Output.Value.BufferView?.Value?.Buffer);
 				attributeAccessor = new AttributeAccessor
 				{
 					AccessorId = samplerDef.Output,
-					bufferData = outputBufferCacheData.bufferData,
-					Offset = outputBufferCacheData.ChunkOffset
+					bufferData = outputBufferCacheData?.bufferData ?? default,
+					Offset = outputBufferCacheData?.ChunkOffset ?? 0,
 				};
 
 				samplers[i].Output = attributeAccessor;
@@ -205,8 +205,8 @@ namespace UnityGLTF
 					key.outTangent = 0;
 					break;
 				case InterpolationType.LINEAR:
-					key.inTangent = GetCurveKeyframeLeftLinearSlope(keyframes, keyframeIndex);
-					key.outTangent = GetCurveKeyframeLeftLinearSlope(keyframes, keyframeIndex + 1);
+					key.inTangent = GetCurveKeyframeLeftLinearSlope(keyframes, keyframeIndex, ref AnyAnimationTimeNotIncreasing);
+					key.outTangent = GetCurveKeyframeLeftLinearSlope(keyframes, keyframeIndex + 1, ref AnyAnimationTimeNotIncreasing);
 					break;
 				case InterpolationType.STEP:
 					key.inTangent = float.PositiveInfinity;
@@ -218,7 +218,7 @@ namespace UnityGLTF
 			keyframes[keyframeIndex] = key;
 		}
 
-		private static float GetCurveKeyframeLeftLinearSlope(Keyframe[] keyframes, int keyframeIndex)
+		private static float GetCurveKeyframeLeftLinearSlope(Keyframe[] keyframes, int keyframeIndex, ref bool anyNonCreasing)
 		{
 			if (keyframeIndex <= 0 || keyframeIndex >= keyframes.Length)
 			{
@@ -233,7 +233,7 @@ namespace UnityGLTF
 				var k = keyframes[keyframeIndex];
 				k.time = keyframes[keyframeIndex - 1].time + Mathf.Epsilon + 1 / 100f;
 				keyframes[keyframeIndex] = k;
-				Debug.Log(LogType.Warning, "Time of subsequent animation keyframes is not increasing (glTF-Validator error ACCESSOR_ANIMATION_INPUT_NON_INCREASING)");
+				anyNonCreasing = true;
 				return float.PositiveInfinity;
 			}
 			return valueDelta / timeDelta;
@@ -358,6 +358,27 @@ namespace UnityGLTF
 							switch (rootType)
 							{
 								case "nodes":
+									var nodeExtension = pointerHierarchy.FindNext(PointerPath.PathElement.Extension);
+									if (nodeExtension != null)
+									{
+										var extensionPath = nodeExtension.ExtractPath();
+										if (extensionPath == "extensions/KHR_node_visibility/visible")
+										{
+											pointerData = new AnimationPointerData();
+											pointerData.targetNodeIds = new int[] {rootIndex.index};
+											nodeIds = pointerData.targetNodeIds;
+											pointerData.unityPropertyNames = new string[1] { "m_IsActive" };
+											pointerData.targetType = typeof(GameObject);
+											pointerData.primaryData = samplerCache.Output; 
+											pointerData.importAccessorContentConversion = (data, frame) =>
+											{
+												var v = data.primaryData.AccessorContent.AsBytes[frame];
+												return new float[] { v > 0 ? 1f : 0f};
+											};
+											break;
+										}
+									}
+
 									var pointerPropertyElement = pointerHierarchy.FindNext(PointerPath.PathElement.Property);
 									if (pointerPropertyElement == null)
 										continue;
@@ -485,6 +506,8 @@ namespace UnityGLTF
 				// In case an animated material are referenced from many nodes, whe need to create a curve for each node. (e.g. Materials)
 				foreach (var nodeId in nodeIds)
 				{
+					if (samplerCache.Input == null || samplerCache.Output == null)
+						continue;
 					var node = await GetNode(nodeId, cancellationToken);
 					var targetNode = _gltfRoot.Nodes[nodeId];
 					relativePath = RelativePathFrom(node.transform, root);

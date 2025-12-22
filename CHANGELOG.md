@@ -4,6 +4,218 @@ All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [2.18.5] - 2025-11-20
+- fix: deprecation warnings in Unity 6.2+
+
+## [2.18.4] - 2025-11-19
+- change: Interactivity spec changes
+- fix: BuiltRP material double side export
+
+## [2.18.3] - 2025-10-16
+- fix: animation step detection logic error
+
+## [2.18.2] - 2025-10-15
+- fix: Unity Build error
+
+## [2.18.1] - 2025-10-15
+- fix: visibility animation tracks changed to unsigned byte data type (0 = false, >0 = true) and STEP interpolationtype
+- add: Interactivity: merging on export of onSelect, onHoverIn and onHoverOut with same target (spec allows only once per target) 
+
+## [2.18.0] - 2025-10-08
+- add: animation support for KHR_node_visibility extension
+- add: export support for URP/Lit materials with "Preserve Specular" enabled
+- fix: animation export: add missing value component curves
+- fix: RoughRefraction filterMode set to Trilinear in RenderGraph mode (fixes #884)
+- fix: missing queue setup when using dispersion (fixes #883)
+- fix: BakeAnimation on export when speed < 0
+- fix: Interactivity Animator.Play export: speed, starttime, endtime setup
+- fix: Interactivity Animator.play: changed start time to cliplength when reversed
+- change: removed obsolete warning for KTX > 3.5 and Draco > 5.2
+- change: clearer animation export warning when gameobject was not exported
+- change: updated README with logo
+
+## [2.17.11] - 2025-09-22
+- fix: blendshape runtime import, positions was getting scaled to zero
+
+## [2.17.10] - 2025-09-12
+- fix: `texcoord` export, previously it was only exported when `Texture Transforms` was enabled
+- fix: Texture export cache, now using the Texture `updateCount` to ensure we don't use an older version from cache
+- fix: PBRGraph inspector now shows UV coordinate properties more reliably
+
+## [2.17.9] - 2025-08-25
+- add: `MarkMaterialAsCustomShaderExport` API to keep original property names in animations
+- change: Importer should always show buttons for Extract / Restore materials
+
+## [2.17.8] - 2025-08-20
+- fix: Build error
+
+## [2.17.7] - 2025-08-20
+- fix: Interactivity: wrong sockets after Tick nodes cleanup
+- fix: Interactivity: input type resolving for GenericMul-Unit export, when inputs comes from CustomEvent
+- fix: added missing ImportContext.SceneImporter assignment 
+
+## [2.17.6] - 2025-08-06
+- fix: order of export checks was wrong for `emissiveFactor` / `_EmissionColor`
+- fix: update to latest KHR_interactivity specification changes from July 2025
+- fix: prevent endless loop in KHR_interactivity type conversion in some edge cases
+- fix: correct input types for `p1` and `p2` in `pointer/interpolate` schema
+- add: support for member interpolation for `Material.mainColor`
+
+## [2.17.5] - 2025-07-25
+- fix: Compiler error when TMP is not installed
+
+## [2.17.4] - 2025-07-17
+- fix: Exporting animation should not abort export for unknown properties
+- fix: Warn when UnityGLTF/PBRGraph can't be imported due to insufficient shader variant limit in Unity
+
+## [2.17.3] - 2025-07-13
+- fix: Restore accidentally removed using
+- fix: Prevent NullReferenceException when exporting textures via callback without other textures in the file
+
+## [2.17.2] - 2025-07-07
+- add: Better redundant node cleanup and precomputation for KHR_interactivity export
+- add: Interactivity nodes `Color.Create()`, `Random.insideUnitSphere`, `Random.onUnitSphere`
+- add: Interactivity nodes `Vector3.MoveTowards()`, `Vector3.Reflect()`, `Vector3.sqrMagnitude`
+- add: Interactivity nodes `Transform.forward`, `Transform.right`, `Transform.up`
+- add: Interactivity nodes `Transform.TransformPoint()`, `Transform.InverseTransformPoint()`, `Transform.GetPositionAndRotation()`, `Transform.SetPositionAndRotation()`
+- change: Interactivity specification changes from June 2025 (renaming of `rotate2d` and `rotate3d` inputs)
+- fix: Add Iridescence properties to material property map for roundtrip support
+- fix: Generate mipmaps for TextMeshPro textures on export
+- fix: Remove baseVertex offset from submesh descriptors when generating lightmap UVs (#668)
+- fix: Order of operations for `Transform.Rotate()` interactivity export
+- fix: `Matrix4x4` index access order for interactivity export
+- fix: Added `isValid` output for `math/inverse` and `math/normalize` schema
+
+## [2.17.1] - 2025-06-12
+- fix: define UnityStereoTransformScreenSpaceTex when it doesn't exist (e.g. some HDRP configurations)
+
+## [2.17.0] - 2025-06-12
+- add: Quaternion nodes for KHR_interactivity visual scripting export
+- add: Importing PNG files without alpha channel in the Editor now sets them as RGB instead of RGBA, leading to better compression and less memory usage (#858)
+- add: Add more bone names to Humanoid import for better compatibility with Unity's FBX importer (#862)
+- change: Implemented specification changes for KHR_interactivity from May 2025
+- change: Enabled `applyRootMotion` for humanoid animator to make it consistent with FBX importer (#868)
+- fix: Sprite Mesh export threw an exception in non-Simple sprite draw mode. Use Unity 2023.2+ for other sprite modes than "Simple".
+- fix: Audio plugin did not correctly check for existance of built-in Unity modules
+- fix: Runtime errors with serialization of editor-only components in some newer Unity versions
+- fix: Improved performance for extracting all materials from an editor-imported glTF file (#855)
+- fix: Marked baseColor and baseColorTexture as main color and main map so they work with Unity's `Material.color` and `Material.mainTexture` properties (#864)
+- fix: Use correct `Auto` queue value for imported materials (#866)
+
+## [2.16.1] - 2025-05-20
+- add: Visual Scripting variables work across multiple scenes now
+- add: partial `KHR_materials_anisotropy` roundtrip support. There is no visual support for it yet, but data is imported and exported correctly from `PBRGraph`.
+- add: experimental `KHR_audio_emitter support`. Please note that this extension is not yet ratified and implementation details may change. The plugin is disabled by default, enable it in `UnityGLTFSettings`.
+- add: Sprite mesh export support through "Bake to Mesh" plugin.
+- add: `KHR_interactivity` plugin now has a button to install the `com.unity.visualscripting` package
+- add: visual badges for non-ratified and experimental extension plugins
+- change: the Export API for `KHR_interactivity` is still undergoing heavy changes while the extension is being finalized.
+- change: removed the `KHR_audio` sample since it's now shipping with this package
+- fix: generated shader converter code doesn't use obsolete API anymore
+- fix: various fixes to visual scripting export support through `KHR_interactivity`
+- fix: fixed incorrect namespace that led to compilation errors in some specific cases
+- fix: wrong asset import check for textures, which led to non-compressed textures at runtime (Fixes #846)
+
+## [2.16.0-pre.3] - 2025-04-15
+- fix: workaround for URP error in Unity 6+ with new Render Graph API (uncatchable and incorrect exception during on-demand rendering)
+- fix: issue when deduplicating shared meshes with different materials (#836)
+- change: numerous KHR_interactivity API changes to make runtime usage and extensibility easier
+- change: remove KHR_audio sample from package samples. If you're interested in KHR_audio_emitter support, please follow the progress of adding it as properly supported extension here: https://github.com/KhronosGroup/UnityGLTF/pull/835.
+
+## [2.16.0-pre.2] - 2025-04-03
+- fix: regression when batch exporting material-only files
+- fix nullreference when loading a materials-only file with `GLTFSceneImporter` or `GLTFComponent`
+- fix GLTFComponent failing when the loaded file is a web URL but "Load from streaming assets" is on (the default). If the URI starts with `http://` or `https://`, we now automatically load from the web.
+- fix: GPU instancing can't be enabled on Shader Graph-based materials when the built-in render pipeline is active. Unity does not support GPU instancing with Shader Graph.
+
+## [2.16.0-pre.1] - 2025-04-03
+- add: Interactivity Export API now has `AddLog` method that takes log settings into account, so app-specific logging can be used
+- add: Transform Modes for batch exporting from the UnityGLTF menu (`Auto`, `Local`, `World`, `Reset`), with options covering various use cases
+- add: editor setting for export type (GLB vs. glTF) from the UnityGLTF menu
+- add: improvements to HDRP material export support (#826)
+- change: API cleanup for Interactivity node export
+- change: removed legacy `GLTFSettings.requireExtensions` option that wasn't really used
+
+## [2.16.0-pre] - 2025-04-02
+
+- add: Editor export support for [`KHR_interactivity`](https://github.com/KhronosGroup/glTF/blob/220ca407a2ce1f8463855803778edf73a885b7e9/extensions/2.0/Khronos/KHR_interactivity/Specification.adoc), [`KHR_node_hoverability`](https://github.com/KhronosGroup/glTF/pull/2426) and [`KHR_node_selectability`](https://github.com/KhronosGroup/glTF/pull/2422).Support for these extensions is based on the draft specification as of Mar 10 2024. Please note that these extensions are not yet ratified and implementation details may change.
+- add: convert `Unity Visual Scripting` Units to `KHR_interactivity` nodes on export, including virtual properties from the [`glTF Object Model`](https://github.com/KhronosGroup/glTF/blob/main/specification/2.0/ObjectModel.adoc). 
+- add: visual hints for which nodes can be exported from Visual Scripting to `KHR_interactivity`
+- add: `KHR_interactivity` export plugin.
+  - This plugin is disabled by default. Enable it in `UnityGLTFSettings`, add a Script Machine component to an object, and author the logic there.
+  - Currently, you can find some samples for interactive scenes here: https://github.com/needle-tools/UnityGLTF-Interactivity-Sample-Assets
+- add: batch export mode is now an option when exporting via the UnityGLTF menu items. This allows exporting many scene objects, prefabs, or scenes as individual or merged files.
+- fix: Remove duplicate `GLTFLoadException` type
+- fix: added `AlphaToMask` and `BlendModePreserveSpecular` float values to material setup and material mappers. This works around a Unity issue where some runtime-created materials have incorrect keywords until refresh of their keywords.
+- fix: Removed synchronous wait in GLB json loading causing spikes
+- change: GLTFComponent: changed `loadOnStart` from private to public
+- fix: added `TextMeshPro.ForceMeshUpdate` to TMP exporter plugin to ensure exports of scenes immediately after loading have correct mesh data for 3D text
+- fix: selecting multiple scenes and exporting via the menu now exports each selected scene as individual file. Previously, it would export the first selected scene only.
+- fix: exporting meshes with zero materials was throwing an exception, now correctly does not export the mesh
+
+## [2.15.0] - 2025-03-06
+
+- fix: assets with absolute URLs or paths containing URL encoded information now load correctly
+- fix: improve shader dependencies in editor importer to work around some edge cases at first library import
+- fix: check all sub-meshes of used attributes instead of only the first one when creating attribute arrays
+- fix: ensure progress callback is triggered before `onLoadComplete` in scene loader
+- fix: prevent null reference exception when plugin is not loaded/defined
+- fix: work around API change in Unity 6000.0.38f1 that caused compilation error
+- fix: clamped `Sheen Roughness` to 0..1 range in PBRGraph shader
+- fix: `RoughRefractionFeature` now supports Unity 6 and new Render Graph API
+- fix: set volume and transmission materials to `AlphaMode.BLEND` on VisionOS to ensure proper rendering
+- fix: update render pipeline-related methods for Unity 6000.0+
+- change: mark package as compatible with Unity 2021.3+. Legacy support for 2020 and earlier will be removed in future updates.
+- change: renamed `GLTFComponent` setting `AppendStreamingAssets` to `LoadFromStreamingAssetsFolder`
+- add: MaterialX branches to `UnityGLTF/PBRGraph` shader with conditional compilation for VisionOS
+- add: `MaterialXColor` and `MaterialXFloat` shadersubgraphs for platform-specific material settings
+- add: new runtime texture compression option (`None`, `LowQuality`, `HighQuality`) to improve runtime memory usage
+- add: exposed import settings to keep CPU copy of mesh/textures to `GLTFComponent`
+- add: include UnityGLTF package version, Unity version and current render pipeline in `assets.extras` on export
+- add: better code snippets for the readme
+- add: export plugin hook for `ShouldNodeExport` (https://github.com/KhronosGroup/UnityGLTF/pull/767)
+- add: [`KHR_node_visibility`](https://github.com/KhronosGroup/glTF/pull/2410) import and export support, currently disabled by default. Enable in `UnityGLTFSettings`. This is a preparative step for `KHR_interactivity`, which will be added in a later release. Please note that this extension is not yet ratified and implementation details may change.
+- add: schema and serialization support for [`KHR_node_hoverability`](https://github.com/KhronosGroup/glTF/pull/2426) and [`KHR_node_selectability`](https://github.com/KhronosGroup/glTF/pull/2422). Please note that these extensions are not yet ratified and implementation details may change.
+
+## [2.14.1] - 2024-10-28
+
+- fix: compiler error with `ParticleSystemBakeMeshOptions` before 2022.3.11f1 since that's where the API was introduced
+- fix: prevent incorrect warning when meshes don't have UV1/UV2 attributes
+- fix: don't call export multiple times from context menu for multi-selections
+- fix: remove unused property from `GLTFComponent`
+
+## [2.14.0] - 2024-10-06
+
+- fix: potential NullReferenceExceptions when importing material-only, mesh-only or texture-only glTF files
+- fix: check for missing primitives on mesh import instead of throwing
+- fix: GLTFSceneImporter reference counting properly tracks Animation data now
+- fix: incorrect callback subscription in glTF Material editing
+- fix: CanvasExport plugin was not working correctly in WebGL builds
+- fix: rare case of incorrect texture export with invalid texture content hash (thanks @Vaso64)
+- fix: ensure materials created with Create > UnityGLTF > Material use UnityGLTF as importer instead of glTFast
+- fix: Canvas export plugin was not correctly updating the canvas mesh in builds
+- fix: Particle Bake export plugin was not working correctly in 2022.3
+- fix: Import/Export plugin enabled/disabled state was not correctly serialized in some cases
+- fix: TMPro export plugin uses UnityGLTF shaders for export now instead of adding another dependency
+- fix: GLTFSceneImporter can be called without external data loader, but will warn that external data will not be loaded. Previously, a data loader had to be added even when it was not needed.
+- change: log warning when exporting UV0 and UV1 with more than 2 components, as glTF only supports 2-component UVs
+- change: simplify sampler usage in PBRGraph where possible to prevent warnings in later Unity versions
+- change: simplify PBRGraph variants to reduce shader variant count. This removes a separate option to use vertex color.
+- change: material-only files are now imported as MaterialLibrary assets with Material sub-assets, even when only a single material is present
+- add: log more meaningful exception messages on import
+- add: sheen support for PBRGraph
+- add: PBRGraph UI properly shows sheen and dispersion properties
+- add: allow flipping humanoid root bone on import to support more avatar types (like Meta Avatars)
+- add: new "Info" tab in GLTFImporter for asset information (generator, copyright, etc.) about the imported file
+- add: ShaderOverride is now public on GLTFComponent
+- add: new GLTFSceneImporter constructor overload for easier loading of files from streams
+- add: meshes and textures can now be deduplicated on import, since many exporters don't properly instance them
+- add: UV2 is exported as 2-, 3-, or 4-component texture coordinate. 3- and 4-component texture coordinates are not in the core glTF spec, but widely supported by implementations.
+- add: complete PBRGraph and UnlitGraph Shader Variant Collections for easier runtime import and export of glTF files
+- add: options for shader pass stripping in builds to reduce variant count and compilation times
+- add: ability to export a set of materials as material-only glTF or glb file
+- add: option to add new materials to glTF Material Libraries (material-only files)
+
 ## [2.13.0] - 2024-07-23
 
 - fix: empty or invalid root transforms should not be exported
@@ -15,7 +227,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 - fix: added missing generate mitmaps to ktx texture load (#752)
 - fix: bone name mapping for exact names was not applied on humanoid import (#751)
 - fix: added missing using system for uwp target (#757)
-- feat: allow importing non-standard VEC3 and VEC4 TEXCOORD_n data and convert it to VEC2
+- add: allow importing non-standard VEC3 and VEC4 TEXCOORD_n data and convert it to VEC2
 - add: exposed texture readwrite enabled and generate mipmaps option to importer
 - change: removed log for loaded node count mismatch, extensions can modify node counts so the log was misleading
 - change: removed loaded texture count error log: when multiple samplers are used for one texture, the textures will be duplicated

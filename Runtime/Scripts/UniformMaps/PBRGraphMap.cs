@@ -2,9 +2,9 @@ using UnityEngine;
 
 namespace UnityGLTF
 {
-	public class PBRGraphMap : BaseGraphMap, IMetalRoughUniformMap, IVolumeMap, ITransmissionMap, IIORMap, IIridescenceMap, ISpecularMap, IClearcoatMap, IDispersionMap
+	public class PBRGraphMap : BaseGraphMap, IMetalRoughUniformMap, IVolumeMap, ITransmissionMap, IIORMap, IIridescenceMap, ISpecularMap, IClearcoatMap, IDispersionMap, ISheenMap, IAnisotropyMap
 	{
-		private const string PBRGraphGuid = "478ce3626be7a5f4ea58d6b13f05a2e4";
+		internal const string PBRGraphGuid = "478ce3626be7a5f4ea58d6b13f05a2e4";
 
 		public PBRGraphMap() : this("UnityGLTF/PBRGraph") {}
 
@@ -526,6 +526,79 @@ namespace UnityGLTF
 		    get =>  _material.GetFloat("dispersion");
 		    set => _material.SetFloat("dispersion", value);
 	    }
+
+	    public float SheenRoughnessFactor
+	    {
+		    get =>  _material.GetFloat("sheenRoughnessFactor");
+		    set => _material.SetFloat("sheenRoughnessFactor", value);
+	    }
+
+	    public Color SheenColorFactor
+	    {
+		    get =>  _material.GetColor("sheenColorFactor");
+		    set => _material.SetColor("sheenColorFactor", value);
+	    }
+	    
+	    public Texture SheenColorTexture
+	    {
+		    get => _material.GetTexture("sheenColorTexture");
+		    set => _material.SetTexture("sheenColorTexture", value);
+	    }
+
+	    public double SheenColorTextureRotation
+	    {
+		    get => _material.GetFloat("sheenColorTextureRotation");
+		    set => _material.SetFloat("sheenColorTextureRotation", (float) value);
+	    }
+
+	    public Vector2 SheenColorTextureOffset
+	    {
+		    get => _material.GetTextureOffset("sheenColorTexture");
+		    set => _material.SetTextureOffset("sheenColorTexture", value);
+	    }
+
+	    public Vector2 SheenColorTextureScale
+	    {
+		    get => _material.GetTextureScale("sheenColorTexture");
+		    set => _material.SetTextureScale("sheenColorTexture", value);
+	    }
+
+	    public int SheenColorTextureTexCoord
+	    {
+		    get =>  (int)_material.GetFloat("sheenColorTextureTexCoord");
+		    set => _material.SetFloat("sheenColorTextureTexCoord", (float) value);
+	    }
+	    
+	    public Texture SheenRoughnessTexture
+	    {
+		    get => _material.GetTexture("sheenRoughnessTexture");
+		    set => _material.SetTexture("sheenRoughnessTexture", value);
+	    }
+
+	    public double SheenRoughnessTextureRotation
+	    {
+		    get => _material.GetFloat("sheenRoughnessTextureRotation");
+		    set => _material.SetFloat("sheenRoughnessTextureRotation", (float) value);
+	    }
+
+	    public Vector2 SheenRoughnessTextureOffset
+	    {
+		    get => _material.GetTextureOffset("sheenRoughnessTexture");
+		    set => _material.SetTextureOffset("sheenRoughnessTexture", value);
+	    }
+
+	    public Vector2 SheenRoughnessTextureScale
+	    {
+		    get => _material.GetTextureScale("sheenRoughnessTexture");
+		    set => _material.SetTextureScale("sheenRoughnessTexture", value);
+	    }
+
+	    public int SheenRoughnessTextureTexCoord
+	    {
+		    get =>  (int)_material.GetFloat("sheenRoughnessTextureTexCoord");
+		    set => _material.SetFloat("sheenRoughnessTextureTexCoord", (float) value);
+	    }
+
 	    
 	    /* Clearcoat Normal Texture currently not supported
 	    public Texture ClearcoatNormalTexture
@@ -558,5 +631,49 @@ namespace UnityGLTF
 		    set =>  _material.SetFloat("clearcoatNormalTextureTexCoord", (float) value);
 	    }
 	    */
+
+	    public double anisotropyStrength
+	    {
+		    get => _material.GetFloat("anisotropyStrength");
+		    set => _material.SetFloat("anisotropyStrength", (float) value);
+	    }
+
+	    public double anisotropyRotation
+	    {
+		    get => _material.GetFloat("anisotropyRotation");
+		    set => _material.SetFloat("anisotropyRotation", (float) value);
+		    
+	    }
+	    
+	    public Texture anisotropyTexture
+	    {
+		    get => _material.GetTexture("anisotropyTexture");
+		    set => _material.SetTexture("anisotropyTexture", value);
+	    }
+
+	    public double anisotropyTextureRotation
+	    {
+		    get => _material.GetFloat("anisotropyTextureRotation");
+		    set => _material.SetFloat("anisotropyTextureRotation", (float) value);
+	    }
+
+	    public Vector2 anisotropyTextureOffset
+	    {
+		    get => _material.GetTextureOffset("anisotropyTexture");
+		    set => _material.SetTextureOffset("anisotropyTexture", value);
+	    }
+
+	    public Vector2 anisotropyTextureScale
+	    {
+		    get => _material.GetTextureScale("anisotropyTexture");
+		    set => _material.SetTextureScale("anisotropyTexture", value);
+	    }
+
+	    public int anisotropyTextureTexCoord
+	    {
+		    get =>  (int)_material.GetFloat("anisotropyTextureTexCoord");
+		    set => _material.SetFloat("anisotropyTextureTexCoord", (float) value);
+	    }
+
 	}
 }
