@@ -991,12 +991,12 @@ namespace UnityGLTF
 				if (sheenDef.sheenColorTexture != null)
 				{
 					var textureId = sheenDef.sheenColorTexture.Index;
-					tasks.Add(ConstructImageBuffer(textureId.Value, textureId.Id));
+					tasks.Add(ConstructImageBuffer(textureId.Value, textureId.Id, importFromFirebaseStorage));
 				}
 				if (sheenDef.sheenRoughnessTexture != null)
 				{
 					var textureId = sheenDef.sheenRoughnessTexture.Index;
-					tasks.Add(ConstructImageBuffer(textureId.Value, textureId.Id));
+					tasks.Add(ConstructImageBuffer(textureId.Value, textureId.Id, importFromFirebaseStorage));
 				}
 			}
 			
@@ -1006,7 +1006,7 @@ namespace UnityGLTF
 				if (ansiDef.anisotropyTexture != null)
 				{
 					var textureId = ansiDef.anisotropyTexture.Index;
-					tasks.Add(ConstructImageBuffer(textureId.Value, textureId.Id));
+					tasks.Add(ConstructImageBuffer(textureId.Value, textureId.Id, importFromFirebaseStorage));
 				}
 			}
 
