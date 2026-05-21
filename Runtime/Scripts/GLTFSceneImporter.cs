@@ -9,7 +9,9 @@ using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine;
+using UnityEngine.Serialization;
 using UnityGLTF.Cache;
 using UnityGLTF.Extensions;
 using UnityGLTF.Loader;
@@ -30,6 +32,18 @@ namespace UnityGLTF
 		None = 0,
 		Meshes = 1,
 		Textures = 2,
+	}
+	
+	[Serializable]
+	public class DeduplicatedStatistics
+	{
+		public int meshCountBefore;
+		public int meshCountAfter;
+		public int textureCountBefore;
+		public int textureCountAfter;
+		
+		public int MeshesRemoved => meshCountBefore - meshCountAfter;
+		public int TexturesRemoved => textureCountBefore - textureCountAfter;
 	}
 
 	public enum RuntimeTextureCompression
@@ -164,6 +178,9 @@ namespace UnityGLTF
 		public int Timeout = 8;
 
 		private bool _isMultithreaded;
+		
+		internal DeduplicatedStatistics LastImportDeduplicationStatistics => _deduplicatedStatistics;
+
 
 		/// <summary>
 		/// Use Multithreading or not.
@@ -228,7 +245,7 @@ namespace UnityGLTF
 		/// </summary>
 		public List<Object> GenericObjectReferences { get; private set; } = new List<Object>();
 
-		private Dictionary<Stream, NativeArray<byte>> _nativeBuffers = new Dictionary<Stream, NativeArray<byte>>(); 
+		private Dictionary<Stream, (NativeArray<byte> array, ulong gcHandle)> _nativeBuffers = new Dictionary<Stream, (NativeArray<byte> array, ulong gcHandle)>(); 
 #if HAVE_MESHOPT_DECOMPRESS
 		private List<NativeArray<byte>> meshOptNativeBuffers = new List<NativeArray<byte>>();
 #endif
@@ -281,14 +298,18 @@ namespace UnityGLTF
 		protected GLTFRoot _gltfRoot;
 		protected AssetCache _assetCache;
 		protected bool _isRunning = false;
-
+		
+		private Dictionary<int, Mesh> _meshesByAttributeHash = new Dictionary<int, Mesh>();
+		
 		protected ImportProgress progressStatus = default(ImportProgress);
 		protected IProgress<ImportProgress> progress = null;
 
 		private static ILogger Debug = UnityEngine.Debug.unityLogger;
 
 		protected ColorSpace _activeColorSpace;
-
+		
+		protected DeduplicatedStatistics _deduplicatedStatistics;
+		
 		public GLTFSceneImporter(string gltfFileName, ImportOptions options) : this(options)
 		{
 			_gltfFileName = gltfFileName;
@@ -368,12 +389,32 @@ namespace UnityGLTF
 		{
 			if (_nativeBuffers.TryGetValue(stream, out var buffer))
 			{
-				return buffer;
+				return buffer.array;
 			}
 
+			stream.Position = 0;
+			
+			if (stream is MemoryStream memoryStream)
+			{
+				// To safe memory footprint, we try to create a NativeArray without Allocation directly from the MemoryStream buffer.
+				if (memoryStream.TryGetBuffer(out var memStreamBuffer))
+				{
+					unsafe
+					{
+						var ptr = UnsafeUtility.PinGCArrayAndGetDataAddress(memStreamBuffer.Array, out var gcHandle);
+						var nativeBuffer = NativeArrayUnsafeUtility.ConvertExistingDataToNativeArray<byte>(ptr, memStreamBuffer.Count, Allocator.None);
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+						NativeArrayUnsafeUtility.SetAtomicSafetyHandle(ref nativeBuffer,  AtomicSafetyHandle.Create()); 
+#endif
+						
+						_nativeBuffers.Add(stream,new (nativeBuffer, gcHandle));
+						return nativeBuffer;
+					}
+				}
+			}
+			
 			var buf = new byte[stream.Length];
 
-			stream.Position = 0;
 			long remainingSize = stream.Length;
 			while (remainingSize != 0)
 			{
@@ -388,9 +429,9 @@ namespace UnityGLTF
 			}
 
 			var newNativeBuffer = new NativeArray<byte>(buf, Allocator.Persistent);
-
-			_nativeBuffers.Add(stream, newNativeBuffer);
-
+			
+			_nativeBuffers.Add(stream,new (newNativeBuffer,0));
+			
 			return newNativeBuffer;
 		}
 
@@ -405,10 +446,11 @@ namespace UnityGLTF
 						Debug.Log(LogType.Warning, "No filename specified for GLTFSceneImporter, external references will not be loaded");
 						return;
 					}
-					_options.DataLoader = new UnityWebRequestLoader(
-						URIHelper.GetDirectoryName(_gltfFileName, _options.ImportFromFirebaseStorage)
-					);
-					_gltfFileName = URIHelper.GetFileFromUri(new Uri(_gltfFileName));
+					_options.DataLoader = new UnityWebRequestLoader(URIHelper.GetDirectoryName(_gltfFileName, _options.ImportFromFirebaseStorage));
+					if (File.Exists(_gltfFileName))
+						_gltfFileName = Path.GetFileName(_gltfFileName);
+					else
+						_gltfFileName = URIHelper.GetFileFromUri(new Uri(_gltfFileName));
 				}
 				else
 					_options.DataLoader = LegacyLoaderWrapper.Wrap(_options.ExternalDataLoader);
@@ -724,15 +766,11 @@ namespace UnityGLTF
 			{
 				if (IsMultithreaded)
 				{
-					if (_options.DeduplicateResources.HasFlag(DeduplicateOptions.Meshes))
-						await Task.Run(CheckForMeshDuplicates, cancellationToken);
 					if (_options.DeduplicateResources.HasFlag(DeduplicateOptions.Textures))
 						await Task.Run(CheckForDuplicateImages, cancellationToken);
 				}
 				else
 				{
-					if (_options.DeduplicateResources.HasFlag(DeduplicateOptions.Meshes))
-						CheckForMeshDuplicates();
 					if (_options.DeduplicateResources.HasFlag(DeduplicateOptions.Textures))
 						CheckForDuplicateImages();
 				}
@@ -740,6 +778,63 @@ namespace UnityGLTF
 			
 			await ConstructScene(scene, showSceneObj, cancellationToken);
 			
+			if (_options.DeduplicateResources != DeduplicateOptions.None)
+			{
+				if (_options.DeduplicateResources.HasFlag(DeduplicateOptions.Meshes))
+				{
+					if (_deduplicatedStatistics == null)
+						_deduplicatedStatistics = new DeduplicatedStatistics();
+					
+					var meshfilters = CreatedObject.GetComponentsInChildren<MeshFilter>();
+					var smr = CreatedObject.GetComponentsInChildren<SkinnedMeshRenderer>();
+					
+					var meshes = meshfilters.Select(m => m.sharedMesh).Concat(smr.Select(s => s.sharedMesh)).Distinct().ToArray();
+					_deduplicatedStatistics.meshCountBefore = meshes.Length;
+					
+					var meshHashes = MeshHashUtility.ComputeMeshHashes(meshes);
+					
+					var groups = meshHashes.GroupBy(kv => kv.Value).ToDictionary( kv => kv.Key, kv => kv.ToList());
+					var usedHashes = new List<long>();
+
+					// Assign for each mesh-hash with group-count > 1, the first mesh of this hash-group
+					foreach (var m in meshfilters)
+					{
+						var hash = meshHashes[m.sharedMesh];
+						var hashGroup = groups[hash];
+						if (hashGroup.Count > 1)
+						{
+							m.sharedMesh = hashGroup[0].Key;
+							usedHashes.Add(hash);
+						}
+					}
+
+					foreach (var s in smr)
+					{
+						var hash = meshHashes[s.sharedMesh];
+						var hashGroup = groups[hash];
+						if (hashGroup.Count > 1)
+						{
+							s.sharedMesh = hashGroup[0].Key;
+							usedHashes.Add(hash);
+						}
+					}
+
+					int deduplicated = 0;
+					// Destroy all deduplicated meshes 
+					foreach (var hash in usedHashes)
+					foreach (var mesh in groups[hash].Skip(1))
+					{
+						if (mesh.Key == null)
+							continue;
+						deduplicated++;
+						Object.DestroyImmediate(mesh.Key);
+					}
+					
+					_deduplicatedStatistics.meshCountAfter = _deduplicatedStatistics.meshCountBefore - deduplicated;
+					//Debug.Log($"Deduplicated {deduplicated} meshes");
+					
+				}
+			}
 			if (SceneParent != null && CreatedObject)
 			{
 				CreatedObject.transform.SetParent(SceneParent, false);
@@ -1484,9 +1579,12 @@ namespace UnityGLTF
 		{
 			foreach (var buffer in _nativeBuffers)
 			{
-				if (buffer.Value.IsCreated)
-					buffer.Value.Dispose();
-			}
+				if (buffer.Value.array.IsCreated)
+					buffer.Value.array.Dispose();
+
+				if (buffer.Value.gcHandle != 0)
+					UnsafeUtility.ReleaseGCObject(buffer.Value.gcHandle);
+			}			
 			_nativeBuffers.Clear();
 
 #if HAVE_MESHOPT_DECOMPRESS

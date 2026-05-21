@@ -84,6 +84,18 @@ namespace UnityGLTF
 			EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(GLTFImporter._scaleFactor)));
 			EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(GLTFImporter._importCamera)));
 			EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(GLTFImporter._deduplicateResources)));
+			if (t._deduplicatedStatistics != null && t._deduplicateResources != DeduplicateOptions.None)
+			{
+				var stats = t._deduplicatedStatistics;
+				var meshText = t._deduplicateResources.HasFlag(DeduplicateOptions.Meshes)
+					? $"Removed {stats.MeshesRemoved} Meshes ({stats.meshCountAfter}/{stats.meshCountBefore}). "
+					: "";
+				var textureText = t._deduplicateResources.HasFlag(DeduplicateOptions.Textures)
+					? $"Removed {stats.TexturesRemoved} Textures  ({stats.textureCountAfter}/{stats.textureCountBefore}). "
+					: "";
+				EditorGUILayout.LabelField(" ", meshText+textureText, EditorStyles.miniLabel);
+				//EditorGUILayout.HelpBox($"Result: "+meshText+textureText, MessageType.None);
+			}
 			// EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(GLTFImporter._maximumLod)), new GUIContent("Maximum Shader LOD"));
 			EditorGUILayout.Separator();
 			
@@ -138,8 +150,13 @@ namespace UnityGLTF
 		private const string TextureRemappingKey = nameof(GLTFImporterInspector) + "_TextureRemapping";
 		private bool EnableTextureRemapping
 		{
+#if UNITY_6000_4_OR_NEWER
+			get => SessionState.GetBool(TextureRemappingKey + target.GetEntityId(), false);
+			set => SessionState.SetBool(TextureRemappingKey + target.GetEntityId(), value);
+#else
 			get => SessionState.GetBool(TextureRemappingKey + target.GetInstanceID(), false);
 			set => SessionState.SetBool(TextureRemappingKey + target.GetInstanceID(), value);
+#endif
 		}
 		private static readonly GUIContent RemapTexturesToggleContent = new GUIContent("Experimental", "(experimental) Remap textures inside the glTF to textures that are already in your project.");
 
@@ -544,7 +561,8 @@ namespace UnityGLTF
 					sb[i] = '_';
 				}
 			}
-			return sb.ToString();
+
+			return sb.ToString().TrimStart(' ');
 		}
 
 		private static Editor cachedMateriaLibraryEditor;

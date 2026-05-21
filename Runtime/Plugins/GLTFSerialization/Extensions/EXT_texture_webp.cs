@@ -3,19 +3,20 @@ using Newtonsoft.Json.Linq;
 
 namespace GLTF.Schema
 {
-	public class EXT_texture_exr : IExtension
+	[Serializable]
+	public class EXT_texture_webp : IExtension
 	{
-		public const string EXTENSION_NAME = "EXT_texture_exr";
+		public const string EXTENSION_NAME = "EXT_texture_webp";
 		public ImageId source;
 
-		public EXT_texture_exr(ImageId source)
+		public EXT_texture_webp(ImageId source)
 		{
 			this.source = source;
 		}
 
 		public IExtension Clone(GLTFRoot root)
 		{
-			return new EXT_texture_exr(source);
+			return new EXT_texture_webp(source);
 		}
 
 		public JProperty Serialize()
@@ -27,12 +28,12 @@ namespace GLTF.Schema
 			return new JProperty(EXTENSION_NAME, ext);
 		}
 	}
-	
-	public class EXT_texture_exr_Factory : ExtensionFactory
-	{
-		public const string EXTENSION_NAME = EXT_texture_exr.EXTENSION_NAME;
 
-		public EXT_texture_exr_Factory()
+	public class EXT_texture_webp_Factory : ExtensionFactory
+	{
+		public const string EXTENSION_NAME = EXT_texture_webp.EXTENSION_NAME;
+
+		public EXT_texture_webp_Factory()
 		{
 			ExtensionName = EXTENSION_NAME;
 		}
@@ -42,10 +43,10 @@ namespace GLTF.Schema
 			if (extensionToken != null)
 			{
 				if (extensionToken.Value["source"] == null)
-					throw new Exception("EXT_texture_exr extension must contain a source property.");
+					throw new Exception("EXT_texture_webp extension must contain a source property.");
 
 				var reader = extensionToken.Value["source"].CreateReader();
-				var extension = new EXT_texture_exr(ImageId.Deserialize(root, reader));
+				var extension = new EXT_texture_webp(ImageId.Deserialize(root, reader));
 				return extension;
 			}
 
